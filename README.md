@@ -1,10 +1,12 @@
 # Sim_Core
 
-Sim_Core는 FAB 물류, 특히 OHT 운영 정책을 실험하기 위한 **차세대 독립 이산사건 시뮬레이션 코어이자 Digital Twin-ready 플랫폼**입니다.
+Sim_Core는 FAB 물류, 특히 OHT 운영 정책을 실험하기 위한 **차세대 독립 이산사건 시뮬레이션 코어이자 Digital Twin-ready Multi-Scale Simulation 플랫폼**입니다.
 
 이 저장소의 목표는 기존 OHT Emulator, OCS, OCS Replay 또는 특정 상용 시뮬레이터의 구조를 복제하는 것이 아닙니다. 기존 시스템과 분석 자료는 실제 운영 요구사항과 실패 사례를 식별하기 위한 참고 자료로만 사용하며, 필요한 기능은 Sim_Core 고유의 현대적이고 일반화된 구조로 다시 설계합니다.
 
-또한 Sim_Core는 현재 GPU와 고성능 HW 접근성이 제한된 환경에서도 완전한 Headless Simulation을 수행할 수 있어야 하며, 향후 로컬 또는 Cloud GPU가 확보되었을 때 동일 Canonical Model과 Runtime 결과를 별도의 재모델링 없이 Omniverse/Isaac Sim 기반 Digital Twin으로 전환할 수 있도록 설계합니다.
+Sim_Core는 현재 GPU와 고성능 HW 접근성이 제한된 환경에서도 완전한 Headless Simulation을 수행할 수 있어야 하며, 향후 로컬 또는 Cloud GPU가 확보되었을 때 동일 Canonical Model과 Runtime 결과를 별도의 재모델링 없이 Omniverse/Isaac Sim 기반 Digital Twin으로 전환할 수 있도록 설계합니다.
+
+또한 대규모 FAB 모델을 항상 전체 규모와 전체 3D fidelity로 실행하지 않습니다. 먼저 애니메이션 없는 Bottleneck Intelligence 분석으로 병목 후보를 찾고, 관심 구간을 ROI로 추출한 뒤 외부 영역의 부하를 Boundary Contract로 보존하는 Reduced Model을 생성하여 개인 워크스테이션에서도 상세 검증할 수 있도록 설계합니다.
 
 주요 목표는 다음과 같습니다.
 
@@ -16,49 +18,71 @@ Sim_Core는 FAB 물류, 특히 OHT 운영 정책을 실험하기 위한 **차세
 - 실행 간 first divergence와 정책 결정 차이를 추적하는 Run Comparison
 - 권한이 확인된 운영 기록을 시나리오로 재구성하는 Scenario Reconstruction
 - source provenance와 외부 ID lineage를 위한 범용 Source Identity Mapping
-- 실행 근거를 추적할 수 있는 이벤트 로그, 상태 전이, 결정 로그와 결과 지표
 - GPU 없이도 완전 동작하는 고성능 Headless-first 실행 코어
 - Canonical Model에서 USD/Omniverse/Isaac Sim으로 직접 투영하는 Digital Twin Projection
 - Asset Binding Profile 기반의 저품질 Debug Scene부터 고충실도 Digital Twin까지 단계적 표현
 - Simulation Fidelity와 Visualization Fidelity의 독립 제어
-- Local CPU, Batch Server, Cloud GPU, Full Co-simulation을 동일 Model Revision으로 지원
+- Local CPU, Batch Server, Cloud GPU를 동일 Model Revision으로 지원
+- 애니메이션 없는 Static/Quasi-static Bottleneck Analysis와 2D Heatmap
+- Bottleneck-driven ROI 자동/수동 선택
+- ROI 외부 부하를 Equivalent Demand, Boundary Queue, Travel Delay Proxy로 보존하는 Model Reduction
+- Full Model과 Reduced Model의 차이를 검증하는 Reduction Validation
+- Reduced ROI Model 역시 One-click Digital Twin Projection 지원
 
 ## 현재 상태
 
-현재 기준 설계는 `Architecture v3`입니다.
+현재 기준 설계는 `Architecture v4`입니다.
 
-v1의 Canonical Model과 결정론적 DES, v2의 현대적 Policy/Observability 구조를 유지하면서, **HW 접근성 문제를 Core 설계에서 분리하고 향후 Omniverse/Isaac Sim Digital Twin으로 One-click 수준에서 전환할 수 있는 구조**를 핵심 아키텍처로 추가했습니다.
+v1의 Canonical Model과 결정론적 DES, v2의 현대적 Policy/Observability 구조, v3의 Headless-first/One-click Digital Twin 구조를 유지하면서, **대규모 전체 FAB와 개인 워크스테이션 사이를 연결하는 Bottleneck-driven Multi-Scale Simulation과 Model Reduction 구조**를 추가했습니다.
 
 핵심 방향은 다음과 같습니다.
 
-- Simulation Runtime은 GPU와 3D 엔진 없이 완전히 동작
-- Canonical Model은 topology뿐 아니라 geometry, coordinate, semantic metadata를 보존
-- Digital Twin Projection Layer를 공식 아키텍처 경계로 정의
-- Canonical entity와 3D asset을 `AssetBindingProfile`로 분리
-- Simulation Entity ID와 USD Prim Path를 `EntityPrimMap`으로 분리
-- Runtime State를 공통 `EntityStateFrame` 계약으로 2D/3D/Isaac Sim에 전달
-- Simulation time과 render/wall clock을 `Time Bridge`로 분리
-- 결과 Replay만으로도 나중에 Cloud GPU에서 Digital Twin 재생 가능
-- 실제 Isaac Sim Adapter 구현 전부터 Canonical Model을 Digital Twin-ready로 유지
+- 전체 모델은 Simulation Truth로 유지
+- 전체 FAB를 먼저 Static/Quasi-static Bottleneck Analyzer로 빠르게 분석
+- 병목 후보를 2D Heatmap과 Risk Ranking으로 표시
+- 병목 주변을 Region of Interest(ROI)로 선택
+- ROI 내부는 explicit topology/vehicle/resource를 유지
+- ROI 외부는 단순 삭제하지 않고 Boundary Contract로 부하 압력을 보존
+- 예를 들어 3000대급 전체 모델에서 약 300대 수준의 explicit vehicle만 남기는 축소 모델을 생성 가능하도록 설계
+- 축소율 자체보다 inflow/outflow, queue, bottleneck ranking, policy sensitivity 보존을 우선
+- Full Model과 Reduced Model 관계를 Reduction Manifest로 추적
+- 개인 워크스테이션에서 Reduced Model을 반복 검증한 뒤 전체 Headless 또는 Cloud GPU Digital Twin으로 승격 검증
+- Reduced ROI Model도 Full Model과 동일한 Digital Twin Projection 계약을 사용
 
-목표 사용자 경험은 다음과 같습니다.
+권장 검증 흐름:
 
 ```text
-Headless Simulation Model
+Full Canonical Model
         |
         v
-[ Open in Digital Twin ]
+Static / Quasi-static Bottleneck Analysis
         |
         v
-USD Scene Package 자동 생성
+Bottleneck Heatmap + Risk Ranking
         |
         v
-Omniverse / Isaac Sim 로드
+ROI Selection
         |
         v
-동일 Runtime State 또는 Replay 연결
+Model Reduction + Boundary Contract
+        |
+        v
+Reduced Workstation Model
+        |
+        v
+Local Detailed Simulation / Policy A-B Test
+        |
+        v
+Full Headless Confirmation
+        |
+        v
+[ Open ROI in Digital Twin ] 또는 Full Digital Twin
+        |
+        v
+Omniverse / Isaac Sim / Cloud GPU
 ```
 
+- [Simulator Architecture v4](docs/architecture/SIM_CORE_ARCHITECTURE_V4.md)
 - [Simulator Architecture v3](docs/architecture/SIM_CORE_ARCHITECTURE_V3.md)
 - [Simulator Architecture v2](docs/architecture/SIM_CORE_ARCHITECTURE_V2.md)
 - [Simulator Architecture v1](docs/architecture/SIM_CORE_ARCHITECTURE_V1.md)
@@ -72,20 +96,25 @@ Omniverse / Isaac Sim 로드
 1. Legacy 시스템은 참고 자료이며 Target Architecture가 아닙니다.
 2. 원본 포맷과 외부 시스템의 구조는 Adapter 밖으로 새지 않습니다.
 3. 시뮬레이션 결과의 기준은 UI나 3D가 아니라 Headless Simulation Runtime입니다.
-4. 모델 revision, scenario, seed, policy version, engine version이 같으면 이벤트 순서와 결과 hash가 같아야 합니다.
-5. routing, dispatch, mobility, traffic 등의 운영 로직은 교체 가능한 Policy로 구성합니다.
-6. 모든 주요 상태 변화와 정책 결정은 원인 event와 reason을 추적할 수 있어야 합니다.
-7. Replay는 특정 OCS Replay 프로그램을 모방하지 않고 Observability와 Debugging 기능으로 설계합니다.
-8. 외부 ID는 Canonical ID와 직접 혼용하지 않고 provenance 기반 Source Identity로 추적합니다.
-9. 이동 충실도는 단순 이동 시간부터 연속 위치·가감속·구역 제어까지 단계적으로 높입니다.
-10. GPU나 Isaac Sim이 없어도 Core Simulation 기능은 완전 동작해야 합니다.
-11. Canonical Model은 향후 Digital Twin 투영에 필요한 좌표, geometry, semantic metadata를 처음부터 보존합니다.
-12. USD/Omniverse/Isaac Sim은 Adapter이며 Domain과 Kernel은 특정 3D 엔진에 종속되지 않습니다.
-13. Simulation Fidelity와 Visualization Fidelity를 독립적으로 선택할 수 있어야 합니다.
-14. 3D asset은 Model에 직접 결합하지 않고 versioned Asset Binding Profile로 관리합니다.
-15. Runtime State와 Digital Twin 표현은 versioned State Contract로 연결합니다.
-16. Cloud GPU가 확보되었을 때 Model 재구축 없이 Digital Twin으로 전환 가능해야 합니다.
-17. 권한이 불명확한 코드, 바이너리, UI 자산은 제품 코드에 포함하지 않습니다.
+4. 전체 Canonical Model은 Simulation Truth이며 Reduced Model은 특정 질문을 위한 Projection입니다.
+5. 모델 revision, scenario, seed, policy version, engine version이 같으면 이벤트 순서와 결과 hash가 같아야 합니다.
+6. routing, dispatch, mobility, traffic 등의 운영 로직은 교체 가능한 Policy로 구성합니다.
+7. 모든 주요 상태 변화와 정책 결정은 원인 event와 reason을 추적할 수 있어야 합니다.
+8. Replay는 특정 OCS Replay 프로그램을 모방하지 않고 Observability와 Debugging 기능으로 설계합니다.
+9. 외부 ID는 Canonical ID와 직접 혼용하지 않고 provenance 기반 Source Identity로 추적합니다.
+10. GPU나 Isaac Sim이 없어도 Core Simulation과 Bottleneck Analysis 기능은 완전 동작해야 합니다.
+11. 병목 분석 결과는 3D 애니메이션 없이 2D Heatmap과 정적 지표로 확인 가능해야 합니다.
+12. 차량 수 축소는 random sampling으로 수행하지 않고 ROI 외부 부하를 Boundary Contract로 보존합니다.
+13. Reduction Ratio보다 병목 위치, queue pressure, policy sensitivity 등 목적별 특성 보존이 우선입니다.
+14. Full Model과 Reduced Model의 관계는 Reduction Manifest로 항상 추적합니다.
+15. 축소 모델의 신뢰성은 Reduction Validation Report로 검증합니다.
+16. Canonical Model은 향후 Digital Twin 투영에 필요한 좌표, geometry, semantic metadata를 처음부터 보존합니다.
+17. USD/Omniverse/Isaac Sim은 Adapter이며 Domain과 Kernel은 특정 3D 엔진에 종속되지 않습니다.
+18. Simulation Scale, Simulation Fidelity, Visualization Fidelity를 독립적으로 선택할 수 있어야 합니다.
+19. 3D asset은 Model에 직접 결합하지 않고 versioned Asset Binding Profile로 관리합니다.
+20. Reduced ROI Model과 Full Model 모두 동일한 Digital Twin Projection 계약을 사용합니다.
+21. Cloud GPU가 확보되었을 때 Model 재구축 없이 Digital Twin으로 전환 가능해야 합니다.
+22. 권한이 불명확한 코드, 바이너리, UI 자산은 제품 코드에 포함하지 않습니다.
 
 ## 계획된 저장소 구조
 
@@ -99,31 +128,45 @@ Sim_Core/
 │   ├── scenario/
 │   ├── runtime/
 │   ├── observability/
-│   └── digital_twin/       # coordinate, asset binding, entity mapping, state contract
+│   ├── bottleneck/          # candidate, overlay, analysis result
+│   ├── reduction/           # ROI, boundary, manifest, validation
+│   └── digital_twin/        # coordinate, asset binding, entity mapping, state contract
 ├── src/
 │   ├── application/         # use case와 run orchestration
 │   ├── domain/              # OHT, Job, Network, Resource 모델
 │   ├── kernel/              # 시간, event queue, scheduler, RNG
 │   ├── modules/             # routing, dispatch, mobility, traffic, energy, deadlock
+│   ├── analysis/
+│   │   ├── bottleneck/      # static/quasi-static bottleneck intelligence
+│   │   ├── graph_metrics/
+│   │   └── flow_estimation/
+│   ├── reduction/
+│   │   ├── roi/
+│   │   ├── boundary/
+│   │   ├── aggregation/
+│   │   └── validation/
 │   ├── observability/       # timeline, replay, snapshot, comparison, analytics
 │   ├── digital_twin/
-│   │   ├── projection/      # Canonical Model -> target scene
-│   │   ├── asset_binding/   # semantic entity -> 3D asset
-│   │   ├── state_bridge/    # Runtime State -> Digital Twin State
-│   │   └── time_bridge/     # simulation time -> render/wall clock
-│   ├── ports/               # importer, store, observer, integration 인터페이스
+│   │   ├── projection/      # Canonical/Reduced Model -> target scene
+│   │   ├── asset_binding/
+│   │   ├── state_bridge/
+│   │   └── time_bridge/
+│   ├── ports/
 │   └── adapters/
 │       ├── file/
 │       ├── integration/
 │       └── digital_twin/
 │           ├── usd/
 │           └── isaac_sim/
-└── tests/                   # unit, contract, golden, regression, projection, performance
+└── tests/
+    ├── unit/
+    ├── contract/
+    ├── golden/
+    ├── reduction/
+    ├── equivalence/
+    ├── projection/
+    └── performance/
 ```
-
-Digital Twin 계층은 Domain이나 Kernel의 하위가 아니라 별도의 outward-facing projection 계층입니다.
-
-실제 Isaac Sim Adapter 구현은 뒤 단계에서 진행할 수 있지만, Canonical coordinate contract, semantic type, geometry schema, AssetBindingProfile, EntityPrimMap, Runtime State Contract는 초기 Foundation 단계부터 Digital Twin-ready 상태로 유지합니다.
 
 ## 기준 분석 자료
 
