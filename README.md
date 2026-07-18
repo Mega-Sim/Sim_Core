@@ -111,6 +111,42 @@ Omniverse / Isaac Sim / Cloud GPU
 - [ADR-0003: Canonical Facility Model 경계](docs/architecture/decisions/0003-canonical-facility-model-boundary.md)
 - [ADR-0004: C++20 헤드리스 코어](docs/architecture/decisions/0004-cpp20-headless-core.md)
 
+## 최초 개발 Vertical Slice
+
+설계가 코드 구조만 만든 채 오래 분리되지 않도록, 첫 개발 단위에서 다음 최소 실행 경로를 구현했습니다.
+
+- CMake/C++20 정적 라이브러리와 Headless CLI
+- versioned Canonical Facility/Scenario JSON Schema
+- Node, 방향성 Edge, Station, Source Identity, 좌표·geometry 계약
+- 구조·단위·geometry·graph·scenario 사전 검증
+- `int64` microsecond와 `(time, priority, sequence)` 결정론적 Event Queue
+- generation/tombstone 취소와 timestamp별 zero-delay guard
+- 자유주행시간 기반 방향성 Dijkstra와 nearest-feasible dispatch
+- F0 차량/Job 상태 전이
+- 결정론적 JSONL Event Trace, Run Manifest, 최소 Trace Replay
+- 단일 직선 network Golden Scenario
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+
+./build/sim-core validate \
+  --facility examples/single_line/facility.json \
+  --scenario examples/single_line/scenario.json
+
+./build/sim-core run \
+  --facility examples/single_line/facility.json \
+  --scenario examples/single_line/scenario.json \
+  --output run-output
+
+./build/sim-core replay --trace run-output/event_trace.jsonl
+```
+
+Golden Scenario는 차량 1대와 Job 1건이 `IDLE → TO_PICKUP → LOADING → TO_DROPOFF → UNLOADING → IDLE`로 20초에 완료되며, 반복 실행 시 동일한 `trace_hash`를 생성합니다.
+
+- [최초 Vertical Slice 개발 기준과 검증 결과](docs/development/VERTICAL_SLICE_01.md)
+
 ## 핵심 설계 원칙
 
 1. Legacy 시스템은 참고 자료이며 Target Architecture가 아닙니다.

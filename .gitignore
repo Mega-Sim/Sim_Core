@@ -1,0 +1,5 @@
+/build/
+/out/
+/run-output/
+/.cache/
+compile_commands.json
