@@ -1,3 +1,5 @@
+#include "sim_core/adapters/csv/from_to_csv.hpp"
+#include "sim_core/analysis/cross_domain_validator.hpp"
 #include "sim_core/application/simulation.hpp"
 #include "sim_core/model/json_loader.hpp"
 #include "sim_core/model/validator.hpp"
@@ -22,6 +24,8 @@ void print_help() {
         << "Sim_Core deterministic headless Vertical Slice\n\n"
         << "Usage:\n"
         << "  sim-core validate --facility FILE --scenario FILE\n"
+        << "  sim-core analyze --facility FILE --scenario FILE"
+           " [--from-to-csv FILE] [--baseline-facility FILE] [--output FILE]\n"
         << "  sim-core run --facility FILE --scenario FILE [--output DIR]\n"
         << "  sim-core replay --trace FILE\n";
 }
@@ -96,6 +100,53 @@ int run_command(const Options& options) {
     return result.manifest.status == "COMPLETED" ? 0 : 3;
 }
 
+int analyze_command(const Options& options) {
+    const auto facility = sim_core::model::JsonLoader::load_facility(
+        require(options, "--facility"));
+    auto scenario = sim_core::model::JsonLoader::load_scenario(
+        require(options, "--scenario"));
+    if (options.contains("--from-to-csv")) {
+        scenario.from_to_demands =
+            sim_core::adapters::csv::FromToCsvAdapter::load(
+                options.at("--from-to-csv"));
+    }
+    sim_core::model::Validator::throw_if_invalid(
+        sim_core::model::Validator::validate_facility(facility));
+    auto runtime_contract = scenario;
+    runtime_contract.from_to_demands.clear();
+    sim_core::model::Validator::throw_if_invalid(
+        sim_core::model::Validator::validate_scenario(
+            facility,
+            runtime_contract));
+
+    auto report = sim_core::analysis::CrossDomainValidator::analyze(
+        facility,
+        scenario);
+    if (options.contains("--baseline-facility")) {
+        const auto baseline = sim_core::model::JsonLoader::load_facility(
+            options.at("--baseline-facility"));
+        sim_core::model::Validator::throw_if_invalid(
+            sim_core::model::Validator::validate_facility(baseline));
+        sim_core::analysis::CrossDomainValidator::compare_revisions(
+            report,
+            baseline,
+            facility);
+    }
+    if (options.contains("--output")) {
+        report.write_json(options.at("--output"));
+        std::cout << "analysis_status=" << (report.ok() ? "PASS" : "FAIL")
+                  << " errors=" << report.error_count()
+                  << " warnings=" << report.warning_count()
+                  << " routes=" << report.demand_routes.size() << '\n';
+        std::cout << "output="
+                  << std::filesystem::absolute(options.at("--output")).string()
+                  << '\n';
+    } else {
+        std::cout << report.to_json();
+    }
+    return report.ok() ? 0 : 4;
+}
+
 int replay_command(const Options& options) {
     const auto summary = sim_core::observability::TraceReplay::replay(
         require(options, "--trace"));
@@ -123,6 +174,9 @@ int main(const int argc, char* argv[]) {
         const auto options = parse_options(argc, argv, 2);
         if (command == "validate") {
             return validate_command(options);
+        }
+        if (command == "analyze") {
+            return analyze_command(options);
         }
         if (command == "run") {
             return run_command(options);

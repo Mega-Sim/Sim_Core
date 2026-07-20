@@ -10,6 +10,13 @@
 
 namespace sim_core::domain {
 
+struct FromToDemand {
+    std::string id;
+    std::string from_station_id;
+    std::string to_station_id;
+    double expected_moves_per_hour{};
+};
+
 struct ScenarioDefinition {
     std::string schema_version;
     std::string scenario_id;
@@ -19,6 +26,7 @@ struct ScenarioDefinition {
     std::uint64_t master_seed{};
     std::vector<VehicleDefinition> vehicles;
     std::vector<JobDefinition> jobs;
+    std::vector<FromToDemand> from_to_demands;
 };
 
 }  // namespace sim_core::domain

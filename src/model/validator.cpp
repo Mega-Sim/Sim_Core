@@ -171,7 +171,7 @@ const ValidationReport& ValidationError::report() const noexcept {
 
 ValidationReport Validator::validate_facility(const FacilityModelRevision& model) {
     ValidationReport report;
-    if (model.schema_version != "1.0.0") {
+    if (model.schema_version != "1.0.0" && model.schema_version != "1.1.0") {
         add(
             report,
             DiagnosticSeverity::error,
@@ -179,7 +179,7 @@ ValidationReport Validator::validate_facility(const FacilityModelRevision& model
             "UNSUPPORTED_SCHEMA_VERSION",
             "facility",
             model.model_id,
-            "supported facility schema_version is 1.0.0");
+            "supported facility schema_version values are 1.0.0 and 1.1.0");
     }
     if (model.model_id.empty() || model.revision_id.empty() || model.content_hash.empty()) {
         add(
@@ -190,6 +190,18 @@ ValidationReport Validator::validate_facility(const FacilityModelRevision& model
             "facility",
             model.model_id,
             "model_id, revision_id, and content_hash are required");
+    }
+    if (model.schema_version == "1.1.0" &&
+        !model.computed_content_hash.empty() &&
+        model.content_hash != model.computed_content_hash) {
+        add(
+            report,
+            DiagnosticSeverity::error,
+            DiagnosticCategory::structural,
+            "CONTENT_HASH_MISMATCH",
+            "facility",
+            model.model_id,
+            "content_hash must equal the SHA-256 of the canonical JSON document without content_hash");
     }
     if (model.coordinate_reference.length_unit != "micrometer") {
         add(
@@ -245,8 +257,18 @@ ValidationReport Validator::validate_facility(const FacilityModelRevision& model
     const auto node_ids = collect_unique_ids(report, model.nodes, "node");
     const auto edge_ids = collect_unique_ids(report, model.edges, "edge");
     const auto station_ids = collect_unique_ids(report, model.stations, "station");
+    const auto control_point_ids =
+        collect_unique_ids(report, model.control_points, "control_point");
+    const auto zone_ids = collect_unique_ids(report, model.zones, "zone");
+    const auto parking_ids = collect_unique_ids(report, model.parkings, "parking");
+    const auto charger_ids = collect_unique_ids(report, model.chargers, "charger");
+    const auto vehicle_type_ids =
+        collect_unique_ids(report, model.vehicle_types, "vehicle_type");
     (void)edge_ids;
-    (void)station_ids;
+    (void)control_point_ids;
+    (void)zone_ids;
+    (void)parking_ids;
+    (void)charger_ids;
     if (model.nodes.empty() || model.edges.empty() || model.stations.empty()) {
         add(
             report,
@@ -377,6 +399,124 @@ ValidationReport Validator::validate_facility(const FacilityModelRevision& model
                 station.id,
                 "operation_type is required");
         }
+        if (station.handling_capacity_per_hour < 0.0) {
+            add(
+                report,
+                DiagnosticSeverity::error,
+                DiagnosticCategory::unit,
+                "NEGATIVE_STATION_CAPACITY",
+                "station",
+                station.id,
+                "handling_capacity_per_hour cannot be negative");
+        }
+    }
+
+    for (const auto& transform : model.geometry_transforms) {
+        if (transform.source_namespace.empty() || transform.source_frame.empty() ||
+            transform.target_frame.empty() || transform.scale_numerator <= 0 ||
+            transform.scale_denominator <= 0) {
+            add(
+                report,
+                DiagnosticSeverity::error,
+                DiagnosticCategory::geometry,
+                "INVALID_GEOMETRY_TRANSFORM",
+                "geometry_transform",
+                transform.source_namespace,
+                "namespace, source/target frame, and positive scale ratio are required");
+        }
+    }
+    for (const auto& point : model.control_points) {
+        validate_source_identities(
+            report,
+            point.source_identities,
+            "control_point",
+            point.id);
+        if (!node_ids.contains(point.attachment_node_id) || point.control_type.empty()) {
+            add(
+                report,
+                DiagnosticSeverity::error,
+                DiagnosticCategory::graph,
+                "INVALID_CONTROL_POINT",
+                "control_point",
+                point.id,
+                "control point requires an existing attachment node and control_type");
+        }
+    }
+    for (const auto& zone : model.zones) {
+        validate_source_identities(report, zone.source_identities, "zone", zone.id);
+        const bool missing_node = std::ranges::any_of(
+            zone.node_ids,
+            [&node_ids](const std::string& id) { return !node_ids.contains(id); });
+        const bool missing_edge = std::ranges::any_of(
+            zone.edge_ids,
+            [&edge_ids](const std::string& id) { return !edge_ids.contains(id); });
+        if ((zone.node_ids.empty() && zone.edge_ids.empty()) || missing_node ||
+            missing_edge || zone.capacity <= 0) {
+            add(
+                report,
+                DiagnosticSeverity::error,
+                DiagnosticCategory::graph,
+                "INVALID_ZONE_MEMBERSHIP",
+                "zone",
+                zone.id,
+                "zone requires valid node/edge members and a positive capacity");
+        }
+    }
+    for (const auto& parking : model.parkings) {
+        validate_source_identities(report, parking.source_identities, "parking", parking.id);
+        const bool missing_type = std::ranges::any_of(
+            parking.allowed_vehicle_type_ids,
+            [&vehicle_type_ids](const std::string& id) {
+                return !vehicle_type_ids.contains(id);
+            });
+        if (!station_ids.contains(parking.station_id) || parking.capacity <= 0 ||
+            missing_type) {
+            add(
+                report,
+                DiagnosticSeverity::error,
+                DiagnosticCategory::structural,
+                "INVALID_PARKING_RESOURCE",
+                "parking",
+                parking.id,
+                "parking requires an existing station, positive capacity, and valid vehicle types");
+        }
+    }
+    for (const auto& charger : model.chargers) {
+        validate_source_identities(report, charger.source_identities, "charger", charger.id);
+        const bool missing_type = std::ranges::any_of(
+            charger.compatible_vehicle_type_ids,
+            [&vehicle_type_ids](const std::string& id) {
+                return !vehicle_type_ids.contains(id);
+            });
+        if (!station_ids.contains(charger.station_id) || charger.capacity <= 0 ||
+            missing_type) {
+            add(
+                report,
+                DiagnosticSeverity::error,
+                DiagnosticCategory::structural,
+                "INVALID_CHARGER_RESOURCE",
+                "charger",
+                charger.id,
+                "charger requires an existing station, positive capacity, and valid vehicle types");
+        }
+    }
+    for (const auto& type : model.vehicle_types) {
+        validate_source_identities(
+            report,
+            type.source_identities,
+            "vehicle_type",
+            type.id);
+        if (type.maximum_speed_um_per_s <= 0 || type.length_um <= 0 ||
+            type.width_um <= 0 || type.height_um <= 0) {
+            add(
+                report,
+                DiagnosticSeverity::error,
+                DiagnosticCategory::unit,
+                "INVALID_VEHICLE_TYPE_PHYSICS",
+                "vehicle_type",
+                type.id,
+                "vehicle dimensions and maximum speed must be positive");
+        }
     }
     return report;
 }
@@ -385,7 +525,8 @@ ValidationReport Validator::validate_scenario(
     const FacilityModelRevision& model,
     const domain::ScenarioDefinition& scenario) {
     ValidationReport report;
-    if (scenario.schema_version != "1.0.0") {
+    if (scenario.schema_version != "1.0.0" &&
+        scenario.schema_version != "1.1.0") {
         add(
             report,
             DiagnosticSeverity::error,
@@ -393,7 +534,7 @@ ValidationReport Validator::validate_scenario(
             "UNSUPPORTED_SCENARIO_SCHEMA",
             "scenario",
             scenario.scenario_id,
-            "supported scenario schema_version is 1.0.0");
+            "supported scenario schema_version values are 1.0.0 and 1.1.0");
     }
     if (scenario.scenario_id.empty() || scenario.model_revision_id != model.revision_id) {
         add(
@@ -499,6 +640,34 @@ ValidationReport Validator::validate_scenario(
                 "job",
                 job.id,
                 "no initial vehicle position can reach the pickup station");
+        }
+    }
+    const auto demand_ids =
+        collect_unique_ids(report, scenario.from_to_demands, "from_to_demand");
+    (void)demand_ids;
+    for (const auto& demand : scenario.from_to_demands) {
+        if (!station_ids.contains(demand.from_station_id) ||
+            !station_ids.contains(demand.to_station_id)) {
+            add(
+                report,
+                DiagnosticSeverity::error,
+                DiagnosticCategory::scenario,
+                "FROM_TO_STATION_NOT_FOUND",
+                "from_to_demand",
+                demand.id,
+                "From-To endpoints must reference existing stations");
+            continue;
+        }
+        if (!std::isfinite(demand.expected_moves_per_hour) ||
+            demand.expected_moves_per_hour <= 0.0) {
+            add(
+                report,
+                DiagnosticSeverity::error,
+                DiagnosticCategory::scenario,
+                "INVALID_FROM_TO_RATE",
+                "from_to_demand",
+                demand.id,
+                "expected_moves_per_hour must be finite and positive");
         }
     }
     return report;

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 project(
     SimCore
-    VERSION 0.1.0
+    VERSION 0.2.0
     DESCRIPTION "Deterministic headless OHT simulation core"
     LANGUAGES CXX
 )
@@ -16,11 +16,14 @@ option(SIM_CORE_BUILD_TESTS "Build Sim_Core tests" ON)
 include(cmake/Dependencies.cmake)
 
 add_library(sim_core
+    src/adapters/csv/from_to_csv.cpp
+    src/analysis/cross_domain_validator.cpp
     src/application/simulation.cpp
     src/domain/state.cpp
     src/kernel/event_queue.cpp
     src/kernel/simulation_time.cpp
     src/model/json_loader.cpp
+    src/model/sha256.cpp
     src/model/validator.cpp
     src/observability/event_trace.cpp
     src/observability/replay.cpp

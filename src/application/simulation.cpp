@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <iomanip>
 #include <map>
 #include <optional>
 #include <sstream>
@@ -375,6 +376,15 @@ private:
             canonical << job.id << '|' << job.pickup_station_id << '|'
                       << job.dropoff_station_id << '|' << job.release_time_us << '|'
                       << job.load_duration_us << '|' << job.unload_duration_us << '\n';
+        }
+
+        auto demands = scenario_.from_to_demands;
+        std::ranges::sort(demands, {}, &domain::FromToDemand::id);
+        canonical << std::hexfloat;
+        for (const auto& demand : demands) {
+            canonical << demand.id << '|' << demand.from_station_id << '|'
+                      << demand.to_station_id << '|'
+                      << demand.expected_moves_per_hour << '\n';
         }
         return observability::EventTrace::stable_hash(canonical.str());
     }

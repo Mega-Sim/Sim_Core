@@ -1,13 +1,17 @@
+#include "sim_core/adapters/csv/from_to_csv.hpp"
+#include "sim_core/analysis/cross_domain_validator.hpp"
 #include "sim_core/application/simulation.hpp"
 #include "sim_core/domain/job.hpp"
 #include "sim_core/domain/vehicle.hpp"
 #include "sim_core/kernel/event_queue.hpp"
 #include "sim_core/kernel/simulation_time.hpp"
 #include "sim_core/model/json_loader.hpp"
+#include "sim_core/model/sha256.hpp"
 #include "sim_core/model/validator.hpp"
 #include "sim_core/observability/replay.hpp"
 #include "sim_core/routing/dijkstra_router.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -62,6 +66,24 @@ sim_core::model::FacilityModelRevision load_facility() {
 sim_core::domain::ScenarioDefinition load_scenario() {
     return sim_core::model::JsonLoader::load_scenario(
         source_path("examples/single_line/scenario.json"));
+}
+
+sim_core::model::FacilityModelRevision load_cross_domain_facility() {
+    return sim_core::model::JsonLoader::load_facility(
+        source_path("examples/cross_domain/facility.json"));
+}
+
+sim_core::domain::ScenarioDefinition load_cross_domain_scenario() {
+    return sim_core::model::JsonLoader::load_scenario(
+        source_path("examples/cross_domain/scenario.json"));
+}
+
+bool has_rule(
+    const sim_core::analysis::CrossDomainReport& report,
+    const std::string_view rule_id) {
+    return std::ranges::any_of(
+        report.diagnostics,
+        [rule_id](const auto& diagnostic) { return diagnostic.rule_id == rule_id; });
 }
 
 sim_core::kernel::EventRequest request(
@@ -217,6 +239,97 @@ void golden_run_is_reproducible_and_replayable() {
     std::filesystem::remove_all(test_directory);
 }
 
+void sha256_and_content_hash_are_verified() {
+    CHECK(
+        sim_core::model::sha256_hex("abc") ==
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    const auto facility = load_cross_domain_facility();
+    CHECK(facility.schema_version == "1.1.0");
+    CHECK(facility.content_hash == facility.computed_content_hash);
+    CHECK(sim_core::model::Validator::validate_facility(facility).ok());
+
+    auto changed = facility;
+    changed.content_hash.back() = changed.content_hash.back() == '0' ? '1' : '0';
+    const auto invalid = sim_core::model::Validator::validate_facility(changed);
+    CHECK(!invalid.ok());
+    CHECK(std::ranges::any_of(invalid.diagnostics, [](const auto& diagnostic) {
+        return diagnostic.code == "CONTENT_HASH_MISMATCH";
+    }));
+}
+
+void from_to_csv_and_cross_domain_route_are_deterministic() {
+    const auto facility = load_cross_domain_facility();
+    auto scenario = load_cross_domain_scenario();
+    scenario.from_to_demands =
+        sim_core::adapters::csv::FromToCsvAdapter::load(
+            source_path("examples/cross_domain/from_to.csv"));
+    const auto first =
+        sim_core::analysis::CrossDomainValidator::analyze(facility, scenario);
+    const auto second =
+        sim_core::analysis::CrossDomainValidator::analyze(facility, scenario);
+    CHECK(first.ok());
+    CHECK(first.warning_count() == 0U);
+    CHECK(first.demand_routes.size() == 1U);
+    CHECK(first.demand_routes.front().distance_um == 30'000'000);
+    CHECK(first.demand_routes.front().travel_time_us == 15'000'000);
+    CHECK(first.demand_routes.front().edge_ids ==
+          std::vector<std::string>({"E-A-B", "E-B-C"}));
+    CHECK(first.to_json() == second.to_json());
+}
+
+void cross_domain_rules_explain_invalid_inputs() {
+    auto facility = load_cross_domain_facility();
+    auto scenario = load_cross_domain_scenario();
+
+    facility.stations.front().source_identities =
+        facility.nodes.front().source_identities;
+    facility.stations.at(1).declared_position =
+        sim_core::model::Position3Um{.x = 20'000'000, .y = 0, .z = 0};
+    scenario.from_to_demands.front().expected_moves_per_hour = 200.0;
+
+    const auto report =
+        sim_core::analysis::CrossDomainValidator::analyze(facility, scenario);
+    CHECK(!report.ok());
+    CHECK(has_rule(report, "CDV-IDENTITY-002"));
+    CHECK(has_rule(report, "CDV-GEOMETRY-004"));
+    CHECK(has_rule(report, "CDV-CAPACITY-001"));
+    CHECK(report.warning_count() == 2U);
+}
+
+void cross_domain_detects_unreachable_demand_and_missing_transform() {
+    auto facility = load_cross_domain_facility();
+    const auto scenario = load_cross_domain_scenario();
+    facility.geometry_transforms.clear();
+    facility.edges.erase(facility.edges.begin() + 1);
+
+    const auto report =
+        sim_core::analysis::CrossDomainValidator::analyze(facility, scenario);
+    CHECK(!report.ok());
+    CHECK(has_rule(report, "CDV-GEOMETRY-003"));
+    CHECK(has_rule(report, "CDV-DEMAND-003"));
+    CHECK(report.demand_routes.empty());
+}
+
+void revision_diff_detects_identity_remap_and_hash_reuse() {
+    const auto baseline = load_cross_domain_facility();
+    auto current = baseline;
+    current.content_hash =
+        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    current.nodes.at(1).source_identities = current.nodes.front().source_identities;
+    current.nodes.front().source_identities.clear();
+
+    auto report = sim_core::analysis::CrossDomainValidator::analyze(
+        current,
+        load_cross_domain_scenario());
+    sim_core::analysis::CrossDomainValidator::compare_revisions(
+        report,
+        baseline,
+        current);
+    CHECK(!report.ok());
+    CHECK(has_rule(report, "CDV-REVISION-002"));
+    CHECK(has_rule(report, "CDV-REVISION-004"));
+}
+
 }  // namespace
 
 int main() {
@@ -228,6 +341,11 @@ int main() {
         {"directed Dijkstra routing", routing_respects_direction_and_integer_time},
         {"deterministic dispatch", nearest_feasible_dispatch_is_deterministic},
         {"golden run and replay", golden_run_is_reproducible_and_replayable},
+        {"SHA-256 content hash", sha256_and_content_hash_are_verified},
+        {"From-To CSV and route analysis", from_to_csv_and_cross_domain_route_are_deterministic},
+        {"cross-domain diagnostics", cross_domain_rules_explain_invalid_inputs},
+        {"unreachable demand and transform diagnostics", cross_domain_detects_unreachable_demand_and_missing_transform},
+        {"revision cross-validation", revision_diff_detects_identity_remap_and_hash_reuse},
     };
 
     std::size_t failures = 0U;
