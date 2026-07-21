@@ -1,0 +1,8 @@
+{
+	"InstallScripts" : 
+	[
+		"/home/user/Desktop/Sim_Core/build/cmake_install.cmake",
+		"/home/user/Desktop/Sim_Core/build/_deps/nlohmann_json-build/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
