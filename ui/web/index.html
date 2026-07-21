@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Sim_Core · Flow Workbench</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="ambient ambient-a"></div>
+  <div class="ambient ambient-b"></div>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 40 40"><path d="M7 12.5 20 5l13 7.5v15L20 35 7 27.5Z"/><path d="m7 12.5 13 7.4 13-7.4M20 20v15"/></svg>
+        </div>
+        <div>
+          <div class="eyebrow">SIM_CORE</div>
+          <div class="brand-title">Flow Workbench</div>
+        </div>
+      </div>
+
+      <nav class="nav" aria-label="워크벤치 메뉴">
+        <button class="nav-item active" data-view="workspace">
+          <span class="nav-icon">⌂</span><span>워크스페이스</span><span class="nav-kbd">1</span>
+        </button>
+        <button class="nav-item" data-view="inputs">
+          <span class="nav-icon">⇧</span><span>입력 · CAD</span><span class="nav-kbd">2</span>
+        </button>
+        <button class="nav-item" data-view="analysis">
+          <span class="nav-icon">⌁</span><span>Flow 분석</span><span class="nav-kbd">3</span>
+        </button>
+        <button class="nav-item" data-view="simulation">
+          <span class="nav-icon">▶</span><span>시뮬레이션</span><span class="nav-kbd">4</span>
+        </button>
+        <button class="nav-item" data-view="lab">
+          <span class="nav-icon">◇</span><span>Future Lab</span><span class="nav-kbd">5</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-spacer"></div>
+      <div class="engine-card">
+        <div class="engine-card-head">
+          <span class="status-dot" id="engineDot"></span>
+          <span id="engineLabel">Core 확인 중</span>
+        </div>
+        <p id="enginePath">실행 환경을 점검하고 있습니다.</p>
+        <button class="text-button" id="copyBuildButton">빌드 명령 복사</button>
+      </div>
+      <div class="sidebar-footer">
+        <span id="uiVersion">UI v—</span>
+        <span class="branch-mini">4차 UI</span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <div class="breadcrumbs"><span>Sim_Core</span><b>/</b><span id="viewCrumb">워크스페이스</span></div>
+          <h1 id="viewTitle">물류 흐름을 한 화면에서 실험합니다</h1>
+        </div>
+        <div class="topbar-actions">
+          <button class="button ghost" id="sampleButton"><span>✦</span> 샘플 불러오기</button>
+          <button class="button primary" id="analyzeTopButton"><span>▷</span> Flow 분석 실행</button>
+        </div>
+      </header>
+
+      <div class="notice prototype-notice" id="prototypeNotice" hidden>
+        <span class="notice-icon">◇</span>
+        <div><strong>UI 프로토타입 영역입니다.</strong><span>화면과 입력 계약을 먼저 검증하는 단계이며 Core 계산 결과로 사용하지 않습니다.</span></div>
+      </div>
+
+      <section class="view active" id="view-workspace">
+        <div class="hero-grid">
+          <article class="hero-card panel">
+            <div class="hero-copy">
+              <span class="section-kicker">MODEL CONTROL CENTER</span>
+              <h2>레이아웃부터 병목 후보까지<br><em>끊김 없이</em> 확인하세요.</h2>
+              <p>현재 1–3차 Core는 실제로 실행하고, CAD·ROI·Digital Twin은 미리 설계된 워크플로에서 입력 계약부터 준비합니다.</p>
+              <div class="hero-actions">
+                <button class="button primary" data-jump="inputs">데이터 연결하기</button>
+                <button class="button subtle" data-action="validate">모델 검증</button>
+              </div>
+            </div>
+            <div class="progress-orbit" aria-label="개발 진행률">
+              <svg viewBox="0 0 160 160"><circle class="orbit-track" cx="80" cy="80" r="62"/><circle class="orbit-progress" cx="80" cy="80" r="62"/></svg>
+              <div><strong>3</strong><span>/ 8 단계</span><small>Core 연결</small></div>
+            </div>
+          </article>
+
+          <article class="panel quick-panel">
+            <div class="panel-heading"><div><span class="section-kicker">QUICK START</span><h3>실행 준비</h3></div><span class="live-badge">LIVE</span></div>
+            <div class="readiness-list">
+              <div class="readiness-row"><span class="check-icon" id="readyFacility">1</span><div><b>Facility</b><small id="facilityName">파일을 선택하세요</small></div></div>
+              <div class="readiness-row"><span class="check-icon" id="readyScenario">2</span><div><b>Scenario</b><small id="scenarioName">파일을 선택하세요</small></div></div>
+              <div class="readiness-row"><span class="check-icon" id="readyDemand">3</span><div><b>From-To</b><small id="demandName">선택 입력입니다</small></div></div>
+            </div>
+            <button class="button full" data-jump="inputs">입력 파일 관리</button>
+          </article>
+        </div>
+
+        <div class="metric-grid">
+          <article class="metric-card"><span class="metric-icon cyan">●</span><div><small>Nodes</small><strong id="nodeMetric">—</strong><span>교차·합류·정차점</span></div></article>
+          <article class="metric-card"><span class="metric-icon blue">↗</span><div><small>Edges</small><strong id="edgeMetric">—</strong><span>단방향 레일 구간</span></div></article>
+          <article class="metric-card"><span class="metric-icon violet">□</span><div><small>Stations</small><strong id="stationMetric">—</strong><span>작업·주차 포트</span></div></article>
+          <article class="metric-card"><span class="metric-icon green">≋</span><div><small>Demand</small><strong id="demandMetric">—</strong><span>From-To 수요</span></div></article>
+        </div>
+
+        <div class="workspace-grid">
+          <article class="panel map-panel">
+            <div class="panel-heading">
+              <div><span class="section-kicker">CANONICAL NETWORK</span><h3>레이아웃 미리보기</h3></div>
+              <div class="legend"><span><i class="line-low"></i> Rail</span><span><i class="dot-station"></i> Station</span><span><i class="line-hot"></i> Flow</span></div>
+            </div>
+            <div class="canvas-toolbar">
+              <button class="icon-button" id="zoomOutButton" title="축소">−</button>
+              <span id="zoomLabel">100%</span>
+              <button class="icon-button" id="zoomInButton" title="확대">＋</button>
+              <button class="icon-button wide" id="fitButton">화면 맞춤</button>
+              <span class="canvas-hint">Edge를 선택하면 상세 값이 표시됩니다.</span>
+            </div>
+            <div class="network-wrap">
+              <svg id="networkCanvas" viewBox="0 0 900 460" role="img" aria-label="Facility 네트워크"></svg>
+              <div class="empty-canvas" id="emptyCanvas"><span>⌁</span><b>표시할 레이아웃이 없습니다.</b><small>샘플 또는 Facility JSON을 불러오세요.</small></div>
+            </div>
+          </article>
+
+          <article class="panel inspector-panel">
+            <div class="panel-heading"><div><span class="section-kicker">INSPECTOR</span><h3>선택 항목</h3></div></div>
+            <div id="inspectorEmpty" class="inspector-empty"><span>◎</span><p>네트워크에서 Edge나 Station을 선택해 주세요.</p></div>
+            <div id="inspectorContent" class="inspector-content" hidden></div>
+            <div class="divider"></div>
+            <div class="mini-title">최근 실행</div>
+            <div class="run-summary" id="runSummary"><span class="run-state idle">대기</span><p>아직 실행 기록이 없습니다.</p></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="view" id="view-inputs">
+        <div class="section-intro"><div><span class="section-kicker">INPUT CONTRACT</span><h2>실제 데이터 연결</h2><p>파일 내용은 로컬 UI 서버 안에서만 처리되며, 실행마다 분리된 작업 폴더를 사용합니다.</p></div></div>
+        <div class="input-grid">
+          <article class="panel upload-card available">
+            <div class="stage-tag available">CORE 연결</div><div class="upload-icon">{ }</div><h3>Facility JSON</h3><p>Node, Edge, Station과 좌표·출처 정보를 포함합니다.</p>
+            <input type="file" id="facilityInput" accept=".json,application/json" hidden>
+            <button class="button subtle full" data-file="facilityInput">JSON 선택</button><small id="facilityFileMeta">최대 25 MB</small>
+          </article>
+          <article class="panel upload-card available">
+            <div class="stage-tag available">CORE 연결</div><div class="upload-icon">▷</div><h3>Scenario JSON</h3><p>차량, Job, 실행시간과 선택적 수요를 정의합니다.</p>
+            <input type="file" id="scenarioInput" accept=".json,application/json" hidden>
+            <button class="button subtle full" data-file="scenarioInput">JSON 선택</button><small id="scenarioFileMeta">최대 25 MB</small>
+          </article>
+          <article class="panel upload-card available">
+            <div class="stage-tag available">CORE 연결</div><div class="upload-icon">≋</div><h3>From-To CSV</h3><p>Station 간 시간당 예상 반송량을 입력합니다.</p>
+            <input type="file" id="demandInput" accept=".csv,text/csv" hidden>
+            <button class="button subtle full" data-file="demandInput">CSV 선택</button><small id="demandFileMeta">선택 입력</small>
+          </article>
+          <article class="panel upload-card prototype cad-upload">
+            <div class="stage-tag prototype">UI 프로토타입</div><div class="upload-icon">⌑</div><h3>CAD 원본</h3><p>DXF, DWG, STEP 파일의 Import 계약을 준비합니다.</p>
+            <input type="file" id="cadInput" accept=".dxf,.dwg,.step,.stp,.ifc" hidden>
+            <button class="button subtle full" data-file="cadInput">CAD 선택</button><small id="cadFileMeta">변환 엔진 미연결</small>
+          </article>
+        </div>
+
+        <article class="panel contract-panel">
+          <div class="panel-heading"><div><span class="section-kicker">CAD ADAPTER CONTRACT</span><h3>CAD 레이어 매핑</h3></div><span class="stage-tag prototype">계약만 생성</span></div>
+          <div class="form-grid">
+            <label><span>도면 단위</span><select id="cadUnit"><option value="mm">millimeter (권장)</option><option value="m">meter</option><option value="um">micrometer</option><option value="inch">inch</option></select></label>
+            <label><span>Up Axis</span><select id="cadUpAxis"><option>Z</option><option>Y</option><option>X</option></select></label>
+            <label><span>Rail 중심선 Layer</span><input id="railLayer" value="OHT_RAIL_CENTER" placeholder="예: OHT_RAIL_CENTER"></label>
+            <label><span>Station Block/Layer</span><input id="stationLayer" value="OHT_STATION" placeholder="예: OHT_STATION"></label>
+            <label><span>진행방향 Layer</span><input id="directionLayer" value="OHT_DIRECTION" placeholder="예: OHT_DIRECTION"></label>
+            <label><span>Canonical Frame</span><input id="targetFrame" value="local-fab" placeholder="local-fab"></label>
+          </div>
+          <div class="contract-actions"><button class="button primary" id="checkCadButton">변환 준비 검사</button><button class="button ghost" id="downloadCadContractButton" disabled>Import 계약 저장</button><p id="cadCheckResult">CAD 파서는 아직 구현되지 않았으며, 여기서는 4차 이후 개발에 사용할 입력 계약을 만듭니다.</p></div>
+        </article>
+      </section>
+
+      <section class="view" id="view-analysis">
+        <div class="section-intro horizontal"><div><span class="section-kicker">A2 + A3 ACTUAL CORE</span><h2>Cross-Domain · Flow Intelligence</h2><p>검증된 최단 경로로 edge frequency, 합류 압력과 Station 용량 여유를 계산합니다.</p></div><div class="action-cluster"><button class="button ghost" data-action="validate">입력 검증</button><button class="button primary" data-action="analyze">분석 실행</button></div></div>
+        <div class="analysis-stats">
+          <article><small>분석 상태</small><strong id="analysisStatus">미실행</strong><span id="analysisStatusSub">Core 결과 대기</span></article>
+          <article><small>Demand Routes</small><strong id="routeMetric">—</strong><span>도달 가능 경로</span></article>
+          <article><small>Top Edge Flow</small><strong id="topFlowMetric">—</strong><span>moves / hour</span></article>
+          <article><small>Max Merge</small><strong id="mergeMetric">—</strong><span>pressure / hour</span></article>
+        </div>
+        <div class="analysis-grid">
+          <article class="panel table-panel">
+            <div class="panel-heading"><div><span class="section-kicker">FLOW RANKING</span><h3>Edge 집중도</h3></div><button class="text-button" id="exportReportButton" disabled>Report 저장</button></div>
+            <div class="table-wrap"><table><thead><tr><th>Edge</th><th>Moves/h</th><th>Share</th><th>Demand</th></tr></thead><tbody id="edgeTableBody"><tr class="empty-row"><td colspan="4">분석을 실행하면 결과가 표시됩니다.</td></tr></tbody></table></div>
+          </article>
+          <article class="panel table-panel">
+            <div class="panel-heading"><div><span class="section-kicker">CAPACITY</span><h3>Station 여유</h3></div></div>
+            <div class="table-wrap"><table><thead><tr><th>Station</th><th>Peak</th><th>사용률</th><th>Margin</th></tr></thead><tbody id="stationTableBody"><tr class="empty-row"><td colspan="4">분석을 실행하면 결과가 표시됩니다.</td></tr></tbody></table></div>
+          </article>
+        </div>
+        <article class="panel terminal-panel">
+          <div class="terminal-head"><span class="terminal-dots"><i></i><i></i><i></i></span><b>Core 실행 로그</b><span id="terminalMeta">대기 중</span></div>
+          <pre id="terminalOutput"><span class="terminal-muted">$ sim-core analyze …</span>
+입력 파일을 연결하고 분석 실행 버튼을 눌러주세요.</pre>
+        </article>
+      </section>
+
+      <section class="view" id="view-simulation">
+        <div class="section-intro horizontal"><div><span class="section-kicker">A1 ACTUAL CORE</span><h2>결정론적 DES 실행</h2><p>Facility와 Scenario를 사용해 현재 차량·Job 상태 전이, manifest와 event trace를 생성합니다.</p></div><button class="button primary" data-action="run">Simulation 실행</button></div>
+        <div class="simulation-grid">
+          <article class="panel sim-control">
+            <div class="panel-heading"><div><span class="section-kicker">RUN CONFIGURATION</span><h3>실행 계약</h3></div><span class="stage-tag available">실제 Core</span></div>
+            <dl class="definition-list"><div><dt>Scenario</dt><dd id="simScenario">—</dd></div><div><dt>Duration</dt><dd id="simDuration">—</dd></div><div><dt>Vehicles</dt><dd id="simVehicles">—</dd></div><div><dt>Jobs</dt><dd id="simJobs">—</dd></div><div><dt>Master Seed</dt><dd id="simSeed">—</dd></div></dl>
+            <button class="button primary full" data-action="run">결정론적 실행 시작</button>
+          </article>
+          <article class="panel sim-result">
+            <div class="panel-heading"><div><span class="section-kicker">RUN MANIFEST</span><h3>실행 결과</h3></div></div>
+            <div class="result-placeholder" id="simPlaceholder"><span>▶</span><b>아직 실행하지 않았습니다.</b><p>현재 Vertical Slice는 입력된 Job을 결정론적으로 처리합니다.</p></div>
+            <div class="manifest-grid" id="manifestGrid" hidden></div>
+          </article>
+        </div>
+        <article class="panel terminal-panel"><div class="terminal-head"><span class="terminal-dots"><i></i><i></i><i></i></span><b>Simulation 로그</b><span id="simTerminalMeta">대기 중</span></div><pre id="simTerminal">$ sim-core run …</pre></article>
+      </section>
+
+      <section class="view" id="view-lab">
+        <div class="section-intro"><div><span class="section-kicker">FUTURE WORKFLOW PROTOTYPE</span><h2>앞으로 만들 기능을 먼저 만져봅니다</h2><p>버튼과 결과 형식을 먼저 고정해 다음 개발에서 Core를 연결하기 쉽게 만든 공간입니다.</p></div></div>
+        <div class="lab-grid">
+          <article class="panel lab-card"><span class="lab-number">A5</span><div class="stage-tag prototype">UI 가설</div><h3>Bottleneck Intelligence</h3><p>Flow share와 merge pressure를 조합한 임시 점수로 화면 표현을 검증합니다.</p><button class="button subtle full" id="previewBottleneckButton">가설 점수 미리보기</button></article>
+          <article class="panel lab-card"><span class="lab-number">A6</span><div class="stage-tag prototype">계약 설계</div><h3>ROI Reduction</h3><p>상위 위험 Edge를 기준으로 축소 모델 생성 요청서를 만듭니다.</p><label class="range-label"><span>인접 확장 깊이 <b id="roiDepthValue">1</b></span><input type="range" id="roiDepth" min="0" max="3" value="1"></label><button class="button subtle full" id="createRoiButton">ROI 요청 생성</button></article>
+          <article class="panel lab-card"><span class="lab-number">A7</span><div class="stage-tag prototype">계약 설계</div><h3>Policy A/B Test</h3><p>Routing·Dispatch 정책 비교 조건과 동일 시드를 구성합니다.</p><div class="ab-row"><select id="policyA"><option>shortest-time</option><option>least-congested</option></select><span>VS</span><select id="policyB"><option>least-congested</option><option>shortest-time</option></select></div><button class="button subtle full" id="createAbButton">비교 계약 생성</button></article>
+          <article class="panel lab-card"><span class="lab-number">DT</span><div class="stage-tag prototype">계약 설계</div><h3>Digital Twin Projection</h3><p>현재 모델에서 USD/Isaac Sim 투영 manifest 초안을 생성합니다.</p><select id="projectionQuality"><option value="debug">Debug geometry</option><option value="review">Review quality</option><option value="digital-twin">Digital Twin</option></select><button class="button subtle full" id="createProjectionButton">Projection 계약 생성</button></article>
+        </div>
+        <article class="panel prototype-output">
+          <div class="panel-heading"><div><span class="section-kicker">PROTOTYPE OUTPUT</span><h3>계약 미리보기</h3></div><button class="text-button" id="downloadPrototypeButton" disabled>JSON 저장</button></div>
+          <pre id="prototypeOutput">아직 생성된 계약이 없습니다.</pre>
+        </article>
+        <div class="capability-grid" id="capabilityGrid"></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast-stack" id="toastStack" aria-live="polite"></div>
+  <div class="loading-overlay" id="loadingOverlay" hidden><div class="loader"></div><b id="loadingTitle">Core 실행 중</b><span id="loadingSub">입력과 결과를 안전하게 분리하고 있습니다.</span></div>
+  <script src="app.js"></script>
+</body>
+</html>
