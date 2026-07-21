@@ -17,6 +17,10 @@ $Python = if (Get-Command python -ErrorAction SilentlyContinue) {
 
 & $Python -m pip install --upgrade pip
 & $Python -m pip install -r desktop\requirements.txt
+& $Python desktop\test_dxf_graph_converter.py
+if ($LASTEXITCODE -ne 0) {
+    throw "DXF graph converter tests failed."
+}
 
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release --parallel
@@ -41,6 +45,7 @@ $PyInstallerArgs = @(
     "--name", "Sim_Core_Flow_Workbench",
     "--add-binary", "$CoreBinary;.",
     "--add-data", "$SampleDir;examples\cross_domain",
+    "--collect-all", "ezdxf",
     "desktop\app.py"
 )
 
