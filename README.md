@@ -1,4 +1,4 @@
-# Sim_Core
+# Sim_Core 2차 개발
 
 Sim_Core는 FAB 물류, 특히 OHT 운영 정책을 실험하기 위한 **차세대 독립 이산사건 시뮬레이션 코어이자 Digital Twin-ready Multi-Scale Simulation 플랫폼**입니다.
 
