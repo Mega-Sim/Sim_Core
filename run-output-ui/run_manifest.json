@@ -1,0 +1,13 @@
+{
+  "engine_version": "0.1.0",
+  "final_simulation_time_us": 20000000,
+  "master_seed": 20260718,
+  "model_revision_id": "single-line-v1",
+  "processed_event_count": 5,
+  "run_fingerprint": "5004192c136cc90e",
+  "scenario_id": "single-line-job",
+  "schema_version": "1.0.0",
+  "status": "COMPLETED",
+  "trace_hash": "70240b9d9276d97c",
+  "trace_hash_algorithm": "fnv1a64"
+}

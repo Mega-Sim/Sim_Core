@@ -1,0 +1,1 @@
+/usr/bin/c++ CMakeFiles/sim_core_cli.dir/apps/sim_core_cli.cpp.o -o sim-core  libsim_core.a
