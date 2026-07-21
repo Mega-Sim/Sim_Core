@@ -7,8 +7,16 @@ $SampleDir = Join-Path $RepoRoot "examples\cross_domain"
 
 Set-Location $RepoRoot
 
-py -m pip install --upgrade pip
-py -m pip install -r desktop\requirements.txt
+$Python = if (Get-Command python -ErrorAction SilentlyContinue) {
+    (Get-Command python).Source
+} elseif (Get-Command py -ErrorAction SilentlyContinue) {
+    (Get-Command py).Source
+} else {
+    throw "Python 3.12 was not found."
+}
+
+& $Python -m pip install --upgrade pip
+& $Python -m pip install -r desktop\requirements.txt
 
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release --parallel
@@ -29,7 +37,7 @@ $PyInstallerArgs = @(
     "desktop\app.py"
 )
 
-py -m PyInstaller @PyInstallerArgs
+& $Python -m PyInstaller @PyInstallerArgs
 
 Write-Host ""
 Write-Host "Build complete:" -ForegroundColor Green
