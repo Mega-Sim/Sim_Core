@@ -2,6 +2,18 @@ name: Sim_Core Native Desktop - Windows EXE
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches:
+      - feature/5차-native-desktop-workbench
+    paths:
+      - "desktop/**"
+      - "apps/**"
+      - "include/**"
+      - "src/**"
+      - "examples/**"
+      - "CMakeLists.txt"
+      - "cmake/**"
+      - ".github/workflows/native-desktop-windows.yml"
   push:
     branches:
       - feature/5차-native-desktop-workbench

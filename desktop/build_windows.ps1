@@ -26,6 +26,13 @@ if (-not (Test-Path $CoreBinary)) {
     throw "Core binary not found: $CoreBinary"
 }
 
+$env:SIM_CORE_BIN = $CoreBinary
+$env:QT_QPA_PLATFORM = "offscreen"
+& $Python desktop\smoke_test.py
+if ($LASTEXITCODE -ne 0) {
+    throw "Native desktop smoke test failed."
+}
+
 $PyInstallerArgs = @(
     "--noconfirm",
     "--clean",

@@ -1,4 +1,4 @@
-# Sim_Core
+# Sim_Core · 1–5차 통합 개발
 
 Sim_Core는 FAB 물류, 특히 OHT 운영 정책을 실험하기 위한 **차세대 독립 이산사건 시뮬레이션 코어이자 Digital Twin-ready Multi-Scale Simulation 플랫폼**입니다.
 
@@ -260,6 +260,22 @@ CLI 명령은 2차와 동일하며, `analyze` JSON report에 `edge_flows`·`node
 - `analyze` 출력은 동일 입력에서 반복 실행 시 byte 단위로 동일
 
 - [3차 Flow Intelligence 개발 기준과 검증 결과](docs/development/VERTICAL_SLICE_03.md)
+
+## 4·5차 개발: 통합 Workbench
+
+4차에서는 1–3차 Core를 한 화면에서 실행하는 UI Workbench를 추가했고, 5차에서는 HTTP 서버와 브라우저 의존성을 제거한 Windows 네이티브 데스크톱 앱으로 전환했습니다.
+
+현재 Windows 실행파일 하나에서 다음 기능을 사용할 수 있습니다.
+
+- Facility/Scenario/From-To 입력 선택과 Canonical Network 2D 표시
+- 1차 결정론적 DES `validate`·`run`과 Run Manifest 확인
+- 2차 Cross-Domain `analyze`와 경로·진단 결과 확인
+- 3차 Edge/Node/Station Flow 지표와 레이아웃 Overlay 확인
+- CAD Import, Bottleneck/ROI, Policy A/B, Digital Twin의 후속 입력 계약 미리보기
+
+CAD 변환과 5차 이후의 분석 기능은 아직 Core 계산 엔진에 연결하지 않았으며, 화면에서 `UI 프로토타입`으로 구분합니다. 실제 결과로 사용할 수 있는 기능은 `CORE 연결`로 표시된 1–3차 범위입니다.
+
+GitHub Actions의 `Sim_Core Native Desktop - Windows EXE` 결과에서 `Sim_Core_Flow_Workbench-windows-x64` Artifact를 내려받아 압축을 푼 뒤 `Sim_Core_Flow_Workbench.exe`를 실행하면 됩니다. 자세한 개발·패키징 방법은 [Native Desktop Workbench 안내](desktop/README.md)를 참고합니다.
 
 ## 핵심 설계 원칙
 
