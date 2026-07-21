@@ -115,8 +115,11 @@ def find_sim_core() -> Optional[Path]:
     candidates.extend(
         [
             REPOSITORY_ROOT / "build" / "sim-core",
+            REPOSITORY_ROOT / "build" / "sim-core.exe",
             REPOSITORY_ROOT / "build" / "Release" / "sim-core",
+            REPOSITORY_ROOT / "build" / "Release" / "sim-core.exe",
             REPOSITORY_ROOT / "out" / "build" / "sim-core",
+            REPOSITORY_ROOT / "out" / "build" / "sim-core.exe",
         ]
     )
     from_path = shutil.which("sim-core")

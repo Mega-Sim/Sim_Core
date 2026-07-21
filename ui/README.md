@@ -23,6 +23,20 @@ UI를 실행합니다.
 python3 ui/run_ui.py
 ```
 
+Windows PowerShell 또는 Git Bash에서는 Python Launcher를 사용하는 다음 명령을 권장합니다.
+
+```powershell
+py ui/run_ui.py
+```
+
+Windows에서 Visual Studio C++ Build Tools를 사용하는 전체 빌드·실행 예시는 다음과 같습니다.
+
+```powershell
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+cmake --build build --config Release
+py ui/run_ui.py
+```
+
 기본 브라우저에서 `http://127.0.0.1:8765`가 열립니다. 브라우저 자동 실행이 필요 없으면 다음과 같이 실행합니다.
 
 ```bash
@@ -86,4 +100,3 @@ Core 기능이 추가되면 다음 순서로 연결합니다.
 2. `/api/status`의 capability를 `prototype`에서 `available`로 변경합니다.
 3. `app.js`의 프로토타입 계약 생성 함수를 실제 API 실행으로 교체합니다.
 4. 화면의 `UI 프로토타입` 표시를 `CORE 연결`로 변경합니다.
-
