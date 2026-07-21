@@ -67,6 +67,9 @@ void finalize(CrossDomainReport& report) {
         report.demand_routes,
         {},
         &DemandRouteObservation::demand_id);
+    std::ranges::sort(report.edge_flows, {}, &EdgeFlowObservation::edge_id);
+    std::ranges::sort(report.node_flows, {}, &NodeFlowObservation::node_id);
+    std::ranges::sort(report.station_flows, {}, &StationFlowObservation::station_id);
 }
 
 std::string entity_ref(const std::string_view type, const std::string& id) {
@@ -365,6 +368,95 @@ void analyze_demands(
     }
 }
 
+// A3 Flow Intelligence: analyze_demands가 만든 reachable demand_routes를 입력으로
+// edge frequency, route concentration, merge pressure, capacity margin을 집계한다.
+// 정적 분석은 시뮬레이션을 대체하지 않고 병목 후보를 사전 탐색하는 저비용 입력이다.
+void analyze_flow(
+    CrossDomainReport& report,
+    const model::FacilityModelRevision& model) {
+    std::map<std::string, const model::Edge*, std::less<>> edges;
+    for (const auto& edge : model.edges) {
+        edges.emplace(edge.id, &edge);
+    }
+
+    // 1) edge frequency와 route concentration.
+    std::map<std::string, EdgeFlowObservation, std::less<>> edge_flows;
+    double total_edge_moves = 0.0;
+    for (const auto& route : report.demand_routes) {
+        for (const auto& edge_id : route.edge_ids) {
+            auto& flow = edge_flows[edge_id];
+            if (flow.edge_id.empty()) {
+                flow.edge_id = edge_id;
+                const auto found = edges.find(edge_id);
+                if (found != edges.end()) {
+                    flow.from_node_id = found->second->from_node_id;
+                    flow.to_node_id = found->second->to_node_id;
+                    flow.length_um = found->second->length_um;
+                }
+            }
+            flow.expected_moves_per_hour += route.expected_moves_per_hour;
+            flow.contributing_demand_ids.push_back(route.demand_id);
+            total_edge_moves += route.expected_moves_per_hour;
+        }
+    }
+    for (auto& [edge_id, flow] : edge_flows) {
+        std::ranges::sort(flow.contributing_demand_ids);
+        flow.demand_count = flow.contributing_demand_ids.size();
+        flow.flow_share = total_edge_moves > 0.0
+                              ? flow.expected_moves_per_hour / total_edge_moves
+                              : 0.0;
+        report.edge_flows.push_back(std::move(flow));
+    }
+
+    // 2) node 유입/유출과 merge pressure.
+    std::map<std::string, NodeFlowObservation, std::less<>> node_flows;
+    for (const auto& flow : report.edge_flows) {
+        auto& into = node_flows[flow.to_node_id];
+        into.node_id = flow.to_node_id;
+        into.inflow_moves_per_hour += flow.expected_moves_per_hour;
+        ++into.incoming_edge_count;
+        auto& out_of = node_flows[flow.from_node_id];
+        out_of.node_id = flow.from_node_id;
+        out_of.outflow_moves_per_hour += flow.expected_moves_per_hour;
+    }
+    for (auto& [node_id, node] : node_flows) {
+        node.merge_pressure =
+            node.incoming_edge_count >= 2U ? node.inflow_moves_per_hour : 0.0;
+        report.node_flows.push_back(std::move(node));
+    }
+
+    // 3) station 유입/유출과 capacity margin.
+    std::map<std::string, double, std::less<>> capacity;
+    for (const auto& station : model.stations) {
+        capacity.emplace(station.id, station.handling_capacity_per_hour);
+    }
+    std::map<std::string, StationFlowObservation, std::less<>> station_flows;
+    for (const auto& route : report.demand_routes) {
+        auto& source = station_flows[route.from_station_id];
+        source.station_id = route.from_station_id;
+        source.outbound_moves_per_hour += route.expected_moves_per_hour;
+        auto& sink = station_flows[route.to_station_id];
+        sink.station_id = route.to_station_id;
+        sink.inbound_moves_per_hour += route.expected_moves_per_hour;
+    }
+    for (auto& [station_id, flow] : station_flows) {
+        flow.peak_moves_per_hour =
+            std::max(flow.inbound_moves_per_hour, flow.outbound_moves_per_hour);
+        const auto limit = capacity.find(station_id);
+        flow.handling_capacity_per_hour =
+            limit != capacity.end() ? limit->second : 0.0;
+        if (flow.handling_capacity_per_hour > 0.0) {
+            flow.capacity_margin_per_hour =
+                flow.handling_capacity_per_hour - flow.peak_moves_per_hour;
+            flow.utilization_ratio =
+                flow.peak_moves_per_hour / flow.handling_capacity_per_hour;
+            flow.over_capacity =
+                flow.peak_moves_per_hour > flow.handling_capacity_per_hour;
+        }
+        report.station_flows.push_back(std::move(flow));
+    }
+}
+
 }  // namespace
 
 std::string_view to_string(const CrossDomainSeverity severity) noexcept {
@@ -446,6 +538,42 @@ std::string CrossDomainReport::to_json() const {
             {"travel_time_us", route.travel_time_us},
         });
     }
+    nlohmann::json edge_flow_values = nlohmann::json::array();
+    for (const auto& flow : edge_flows) {
+        edge_flow_values.push_back({
+            {"edge_id", flow.edge_id},
+            {"from_node_id", flow.from_node_id},
+            {"to_node_id", flow.to_node_id},
+            {"length_um", flow.length_um},
+            {"expected_moves_per_hour", flow.expected_moves_per_hour},
+            {"flow_share", flow.flow_share},
+            {"demand_count", flow.demand_count},
+            {"contributing_demand_ids", flow.contributing_demand_ids},
+        });
+    }
+    nlohmann::json node_flow_values = nlohmann::json::array();
+    for (const auto& flow : node_flows) {
+        node_flow_values.push_back({
+            {"node_id", flow.node_id},
+            {"inflow_moves_per_hour", flow.inflow_moves_per_hour},
+            {"outflow_moves_per_hour", flow.outflow_moves_per_hour},
+            {"incoming_edge_count", flow.incoming_edge_count},
+            {"merge_pressure", flow.merge_pressure},
+        });
+    }
+    nlohmann::json station_flow_values = nlohmann::json::array();
+    for (const auto& flow : station_flows) {
+        station_flow_values.push_back({
+            {"station_id", flow.station_id},
+            {"inbound_moves_per_hour", flow.inbound_moves_per_hour},
+            {"outbound_moves_per_hour", flow.outbound_moves_per_hour},
+            {"peak_moves_per_hour", flow.peak_moves_per_hour},
+            {"handling_capacity_per_hour", flow.handling_capacity_per_hour},
+            {"capacity_margin_per_hour", flow.capacity_margin_per_hour},
+            {"utilization_ratio", flow.utilization_ratio},
+            {"over_capacity", flow.over_capacity},
+        });
+    }
     const nlohmann::json output{
         {"schema_version", schema_version},
         {"model_revision_id", model_revision_id},
@@ -455,6 +583,9 @@ std::string CrossDomainReport::to_json() const {
         {"warning_count", warning_count()},
         {"diagnostics", std::move(diagnostic_values)},
         {"demand_routes", std::move(route_values)},
+        {"edge_flows", std::move(edge_flow_values)},
+        {"node_flows", std::move(node_flow_values)},
+        {"station_flows", std::move(station_flow_values)},
     };
     return output.dump(2) + '\n';
 }
@@ -479,10 +610,14 @@ CrossDomainReport CrossDomainValidator::analyze(
         .scenario_id = scenario.scenario_id,
         .diagnostics = {},
         .demand_routes = {},
+        .edge_flows = {},
+        .node_flows = {},
+        .station_flows = {},
     };
     analyze_identities(report, model);
     analyze_geometry(report, model);
     analyze_demands(report, model, scenario);
+    analyze_flow(report, model);
     finalize(report);
     return report;
 }

@@ -310,6 +310,134 @@ void cross_domain_detects_unreachable_demand_and_missing_transform() {
     CHECK(report.demand_routes.empty());
 }
 
+const sim_core::analysis::EdgeFlowObservation* find_edge_flow(
+    const sim_core::analysis::CrossDomainReport& report,
+    const std::string_view edge_id) {
+    for (const auto& flow : report.edge_flows) {
+        if (flow.edge_id == edge_id) {
+            return &flow;
+        }
+    }
+    return nullptr;
+}
+
+const sim_core::analysis::StationFlowObservation* find_station_flow(
+    const sim_core::analysis::CrossDomainReport& report,
+    const std::string_view station_id) {
+    for (const auto& flow : report.station_flows) {
+        if (flow.station_id == station_id) {
+            return &flow;
+        }
+    }
+    return nullptr;
+}
+
+const sim_core::analysis::NodeFlowObservation* find_node_flow(
+    const sim_core::analysis::CrossDomainReport& report,
+    const std::string_view node_id) {
+    for (const auto& flow : report.node_flows) {
+        if (flow.node_id == node_id) {
+            return &flow;
+        }
+    }
+    return nullptr;
+}
+
+void flow_intelligence_aggregates_edge_and_station_flow() {
+    const auto facility = load_cross_domain_facility();
+    const auto scenario = load_cross_domain_scenario();
+    const auto report =
+        sim_core::analysis::CrossDomainValidator::analyze(facility, scenario);
+    CHECK(report.ok());
+
+    // OD-A-C(40/hour)는 E-A-B -> E-B-C를 지나므로 두 edge 모두 40/hour, 집중도 0.5.
+    CHECK(report.edge_flows.size() == 2U);
+    const auto* first_edge = find_edge_flow(report, "E-A-B");
+    const auto* second_edge = find_edge_flow(report, "E-B-C");
+    CHECK(first_edge != nullptr && second_edge != nullptr);
+    CHECK(first_edge->expected_moves_per_hour == 40.0);
+    CHECK(second_edge->expected_moves_per_hour == 40.0);
+    CHECK(first_edge->flow_share == 0.5);
+    CHECK(second_edge->flow_share == 0.5);
+    CHECK(first_edge->demand_count == 1U);
+    CHECK(first_edge->contributing_demand_ids ==
+          std::vector<std::string>({"OD-A-C"}));
+    // 미사용 edge E-C-A는 flow가 없으므로 관측값에 나타나지 않는다.
+    CHECK(find_edge_flow(report, "E-C-A") == nullptr);
+
+    // 단일 경로에는 유입 edge가 하나뿐이므로 merge pressure는 0.
+    for (const auto& node : report.node_flows) {
+        CHECK(node.merge_pressure == 0.0);
+    }
+
+    const auto* source = find_station_flow(report, "ST-A");
+    const auto* sink = find_station_flow(report, "ST-C");
+    CHECK(source != nullptr && sink != nullptr);
+    CHECK(source->outbound_moves_per_hour == 40.0);
+    CHECK(source->inbound_moves_per_hour == 0.0);
+    CHECK(source->handling_capacity_per_hour == 120.0);
+    CHECK(source->capacity_margin_per_hour == 80.0);
+    CHECK(!source->over_capacity);
+    CHECK(sink->inbound_moves_per_hour == 40.0);
+    CHECK(sink->capacity_margin_per_hour == 80.0);
+}
+
+void flow_intelligence_detects_merge_pressure() {
+    // 두 경로가 N-C로 합류하는 merge 토폴로지를 in-memory로 구성한다.
+    auto facility = load_cross_domain_facility();
+    facility.nodes.push_back(sim_core::model::Node{
+        .id = "N-D",
+        .position = {.x = 0, .y = 20'000'000, .z = 0},
+        .layer = "L1",
+        .role = "rail_station",
+        .source_identities = {},
+    });
+    facility.edges.push_back(sim_core::model::Edge{
+        .id = "E-D-C",
+        .from_node_id = "N-D",
+        .to_node_id = "N-C",
+        .length_um = 20'000'000,
+        .speed_limit_um_per_s = 2'000'000,
+        .polyline = {},
+        .direction = "ONE_WAY",
+        .source_identities = {},
+    });
+    facility.stations.push_back(sim_core::model::Station{
+        .id = "ST-D",
+        .attachment_node_id = "N-D",
+        .operation_type = "LOAD",
+        .declared_position = std::nullopt,
+        .handling_capacity_per_hour = 120.0,
+        .semantic_tags = {},
+        .source_identities = {},
+    });
+
+    auto scenario = load_cross_domain_scenario();
+    scenario.from_to_demands.push_back(sim_core::domain::FromToDemand{
+        .id = "OD-D-C",
+        .from_station_id = "ST-D",
+        .to_station_id = "ST-C",
+        .expected_moves_per_hour = 30.0,
+    });
+
+    const auto report =
+        sim_core::analysis::CrossDomainValidator::analyze(facility, scenario);
+
+    // E-B-C(40)와 E-D-C(30)가 모두 N-C로 유입되므로 merge pressure = 70.
+    const auto* merge = find_node_flow(report, "N-C");
+    CHECK(merge != nullptr);
+    CHECK(merge->incoming_edge_count == 2U);
+    CHECK(merge->inflow_moves_per_hour == 70.0);
+    CHECK(merge->merge_pressure == 70.0);
+
+    // 합류 station ST-C의 유입 압력은 70/hour, capacity margin은 50/hour.
+    const auto* sink = find_station_flow(report, "ST-C");
+    CHECK(sink != nullptr);
+    CHECK(sink->inbound_moves_per_hour == 70.0);
+    CHECK(sink->capacity_margin_per_hour == 50.0);
+    CHECK(!sink->over_capacity);
+}
+
 void revision_diff_detects_identity_remap_and_hash_reuse() {
     const auto baseline = load_cross_domain_facility();
     auto current = baseline;
@@ -345,6 +473,8 @@ int main() {
         {"From-To CSV and route analysis", from_to_csv_and_cross_domain_route_are_deterministic},
         {"cross-domain diagnostics", cross_domain_rules_explain_invalid_inputs},
         {"unreachable demand and transform diagnostics", cross_domain_detects_unreachable_demand_and_missing_transform},
+        {"flow intelligence aggregation", flow_intelligence_aggregates_edge_and_station_flow},
+        {"flow intelligence merge pressure", flow_intelligence_detects_merge_pressure},
         {"revision cross-validation", revision_diff_detects_identity_remap_and_hash_reuse},
     };
 
