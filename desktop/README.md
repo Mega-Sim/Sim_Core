@@ -56,3 +56,5 @@ dist\Sim_Core_Flow_Workbench.exe
 | Bottleneck/ROI/Policy A-B/Digital Twin | 프로토타입 계약, Core 미연결 |
 
 실행 결과는 `%USERPROFILE%\Documents\Sim_Core\Runs` 아래에 실행별로 저장됩니다.
+
+Windows 패키징 과정에서는 `desktop/smoke_test.py`가 화면 없이 네이티브 UI를 실행한 뒤, 포함된 `sim-core.exe`로 Cross-Domain 샘플을 분석하고 Flow 결과가 UI 표에 연결되는지 자동 확인합니다.
