@@ -39,7 +39,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
-    QSizePolicy,
+    QScrollArea,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -47,9 +47,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from dxf_graph_converter import (
+    DxfConversionError,
+    convert_dxf_to_graph,
+    save_graph as write_graph_json,
+)
 
-APP_VERSION = "0.2.0"
-BRANCH_NAME = "feature/5차-native-desktop-workbench"
+
+APP_VERSION = "0.3.0"
+BRANCH_NAME = "agent/Make-Graph-file-from-CAD-Layout-file"
 
 
 def runtime_root() -> Path:
@@ -191,7 +197,16 @@ class MetricCard(QFrame):
 class FileCard(QFrame):
     selected = Signal(str)
 
-    def __init__(self, key: str, icon: str, title: str, description: str, file_filter: str, prototype: bool = False) -> None:
+    def __init__(
+        self,
+        key: str,
+        icon: str,
+        title: str,
+        description: str,
+        file_filter: str,
+        prototype: bool = False,
+        badge_text: Optional[str] = None,
+    ) -> None:
         super().__init__()
         self.key = key
         self.file_filter = file_filter
@@ -200,7 +215,7 @@ class FileCard(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 18, 20, 18)
         layout.setSpacing(8)
-        badge = QLabel("UI 프로토타입" if prototype else "CORE 연결")
+        badge = QLabel(badge_text or ("UI 프로토타입" if prototype else "CORE 연결"))
         badge.setObjectName("PrototypeBadge" if prototype else "AvailableBadge")
         badge.setAlignment(Qt.AlignCenter)
         badge.setFixedWidth(92)
@@ -341,6 +356,100 @@ class NetworkView(QGraphicsView):
         self.resetTransform()
         self.fitInView(bounds, Qt.KeepAspectRatio)
 
+    def set_graph(self, graph: Optional[Dict[str, Any]]) -> None:
+        """Render the Graph_Maker-compatible nodes/edges payload."""
+
+        scene = self.scene()
+        scene.clear()
+        if not graph:
+            label = scene.addText("DXF 파일을 선택하면 변환된 방향성 Graph가 표시됩니다.")
+            label.setDefaultTextColor(QColor("#78909d"))
+            return
+
+        raw_nodes = graph.get("nodes", [])
+        if not raw_nodes:
+            label = scene.addText("표시할 Node가 없습니다.")
+            label.setDefaultTextColor(QColor("#ffb86b"))
+            return
+        xs = [float(node[0]) for node in raw_nodes]
+        ys = [float(node[1]) for node in raw_nodes]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        scale = 900.0 / max(max_x - min_x, max_y - min_y, 1.0)
+
+        def point(node_id: int) -> tuple[float, float]:
+            raw = raw_nodes[node_id]
+            return (float(raw[0]) - min_x) * scale, -(float(raw[1]) - min_y) * scale
+
+        for edge_id, edge in enumerate(graph.get("edges", [])):
+            start_node = int(edge.get("start", -1))
+            end_node = int(edge.get("end", -1))
+            if start_node < 0 or end_node < 0 or start_node >= len(raw_nodes) or end_node >= len(raw_nodes):
+                continue
+            direction = edge.get("dir")
+            directed = (
+                isinstance(direction, list)
+                and len(direction) == 2
+                and all(isinstance(value, int) for value in direction)
+            )
+            source_id, target_id = (direction if directed else [start_node, end_node])
+            x1, y1 = point(start_node)
+            x2, y2 = point(end_node)
+            path = QPainterPath()
+            path.moveTo(x1, y1)
+            path.lineTo(x2, y2)
+
+            if directed:
+                source_x, source_y = point(int(source_id))
+                target_x, target_y = point(int(target_id))
+                delta_x, delta_y = target_x - source_x, target_y - source_y
+                magnitude = math.hypot(delta_x, delta_y)
+                if magnitude > 0.1:
+                    unit_x, unit_y = delta_x / magnitude, delta_y / magnitude
+                    marker_x = source_x + delta_x * 0.58
+                    marker_y = source_y + delta_y * 0.58
+                    arrow_size = min(7.0, max(3.0, magnitude * 0.24))
+                    wing = arrow_size * 0.58
+                    base_x = marker_x - unit_x * arrow_size
+                    base_y = marker_y - unit_y * arrow_size
+                    path.moveTo(marker_x, marker_y)
+                    path.lineTo(base_x - unit_y * wing, base_y + unit_x * wing)
+                    path.moveTo(marker_x, marker_y)
+                    path.lineTo(base_x + unit_y * wing, base_y - unit_x * wing)
+
+            item = QGraphicsPathItem(path)
+            item.setPen(
+                QPen(
+                    QColor("#43e4d3") if directed else QColor("#ffb86b"),
+                    1.8,
+                    Qt.SolidLine if directed else Qt.DashLine,
+                    Qt.RoundCap,
+                    Qt.RoundJoin,
+                )
+            )
+            direction_text = f"{source_id} → {target_id}" if directed else "방향 미결정"
+            item.setToolTip(f"Edge {edge_id}\n{start_node} — {end_node}\n{direction_text}")
+            scene.addItem(item)
+
+        node_radius = 2.8 if len(raw_nodes) < 2000 else 1.8
+        for node_id in range(len(raw_nodes)):
+            x, y = point(node_id)
+            dot = QGraphicsEllipseItem(
+                x - node_radius,
+                y - node_radius,
+                node_radius * 2,
+                node_radius * 2,
+            )
+            dot.setBrush(QColor("#0b1b27"))
+            dot.setPen(QPen(QColor("#8fb8c7"), 1))
+            dot.setToolTip(f"Node {node_id}\n({raw_nodes[node_id][0]}, {raw_nodes[node_id][1]})")
+            scene.addItem(dot)
+
+        bounds = scene.itemsBoundingRect().adjusted(-35, -35, 35, 35)
+        scene.setSceneRect(bounds)
+        self.resetTransform()
+        self.fitInView(bounds, Qt.KeepAspectRatio)
+
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
@@ -352,9 +461,11 @@ class MainWindow(QMainWindow):
         self.scenario_path: Optional[Path] = None
         self.demand_path: Optional[Path] = None
         self.cad_path: Optional[Path] = None
+        self.cad_graph_path: Optional[Path] = None
         self.facility: Optional[Dict[str, Any]] = None
         self.scenario: Optional[Dict[str, Any]] = None
         self.analysis: Optional[Dict[str, Any]] = None
+        self.cad_graph: Optional[Dict[str, Any]] = None
         self.last_manifest: Optional[Dict[str, Any]] = None
         self.core = find_core()
         self.current_action = ""
@@ -462,7 +573,7 @@ class MainWindow(QMainWindow):
         title = QLabel("레이아웃부터 병목 후보까지\n<font color='#43e4d3'>끊김 없이</font> 확인하세요.")
         title.setObjectName("HeroTitle")
         title.setTextFormat(Qt.RichText)
-        desc = QLabel("현재 1–3차 Core는 실제로 실행하고, CAD·ROI·Digital Twin은\n미리 설계된 워크플로에서 입력 계약부터 준비합니다.")
+        desc = QLabel("현재 1–3차 Core와 DXF Graph 변환은 실제로 실행하고,\nROI·Digital Twin은 미리 설계된 워크플로에서 입력 계약부터 준비합니다.")
         desc.setObjectName("Muted")
         copy = QVBoxLayout()
         copy.addWidget(styled_label("MODEL CONTROL CENTER", "Kicker"))
@@ -477,7 +588,7 @@ class MainWindow(QMainWindow):
         actions.addWidget(validate)
         actions.addStretch(1)
         copy.addLayout(actions)
-        orbit = QLabel("<b style='font-size:36px'>3</b> / 8 단계<br><font color='#43e4d3'>Core 연결</font>")
+        orbit = QLabel("<b style='font-size:36px'>4</b> / 8 단계<br><font color='#43e4d3'>실제 연결</font>")
         orbit.setObjectName("Orbit")
         orbit.setAlignment(Qt.AlignCenter)
         orbit.setFixedSize(150, 150)
@@ -513,30 +624,62 @@ class MainWindow(QMainWindow):
             ("facility", "{ }", "Facility JSON", "Node, Edge, Station과 좌표 정보를 포함합니다.", "JSON (*.json)", False),
             ("scenario", "▷", "Scenario JSON", "차량, Job과 실행시간을 정의합니다.", "JSON (*.json)", False),
             ("demand", "≋", "From-To CSV", "Station 간 시간당 예상 반송량입니다.", "CSV (*.csv)", False),
-            ("cad", "⌑", "CAD 원본", "DXF·DWG·STEP Import 계약을 준비합니다.", "CAD (*.dxf *.dwg *.step *.stp *.ifc)", True),
+            ("cad", "⌑", "CAD 원본", "DXF를 열어 방향성 Graph JSON으로 즉시 변환합니다.", "DXF (*.dxf)", False, "DXF 변환"),
         ]
         for definition in definitions:
             card = FileCard(*definition)
             card.selected.connect(lambda path, key=definition[0]: self.select_file(key, path))
             self.file_cards[definition[0]] = card
             cards.addWidget(card)
-        layout.addLayout(cards, 1)
+        layout.addLayout(cards)
         contract = panel()
         form = QGridLayout(contract)
         form.setContentsMargins(22, 19, 22, 19)
-        form.addWidget(section_title("CAD ADAPTER CONTRACT", "CAD 레이어 매핑", "현재는 계약 생성 단계이며 geometry 변환기는 이후 Core에 연결합니다."), 0, 0, 1, 4)
-        self.cad_unit = QComboBox(); self.cad_unit.addItems(["millimeter", "meter", "micrometer", "inch"])
-        self.rail_layer = QLineEdit("OHT_RAIL_CENTER")
-        self.station_layer = QLineEdit("OHT_STATION")
-        self.direction_layer = QLineEdit("OHT_DIRECTION")
-        for column, (name, field) in enumerate([("도면 단위", self.cad_unit), ("Rail 중심선 Layer", self.rail_layer), ("Station Layer", self.station_layer), ("진행방향 Layer", self.direction_layer)]):
+        form.addWidget(section_title("DXF GRAPH ADAPTER", "CAD 변환 설정", "Graph_Maker 참조 로직으로 LINE·ARC를 Node/방향성 Edge로 변환합니다."), 0, 0, 1, 4)
+        self.cad_unit = QComboBox()
+        self.cad_unit.addItems(["millimeter", "meter", "micrometer", "inch"])
+        self.rail_layer = QLineEdit()
+        self.rail_layer.setPlaceholderText("비우면 전체 LINE/ARC Layer")
+        self.arc_segments = QComboBox()
+        self.arc_segments.addItems(["8", "10", "16", "24", "32"])
+        self.arc_segments.setCurrentText("10")
+        self.coordinate_precision = QComboBox()
+        self.coordinate_precision.addItems(["2", "3", "4", "6"])
+        self.coordinate_precision.setCurrentText("3")
+        for column, (name, field) in enumerate([("도면 단위", self.cad_unit), ("Rail Layer (선택)", self.rail_layer), ("ARC 분할 수", self.arc_segments), ("좌표 반올림", self.coordinate_precision)]):
             form.addWidget(styled_label(name, "FieldLabel"), 1, column)
             form.addWidget(field, 2, column)
-        save = button("Import 계약 저장", "secondary")
-        save.clicked.connect(self.save_cad_contract)
-        form.addWidget(save, 3, 3)
+        convert = button("↻  DXF 다시 변환", "secondary")
+        convert.clicked.connect(self.convert_cad_graph)
+        self.cad_save_button = button("Graph JSON 저장", "primary")
+        self.cad_save_button.setEnabled(False)
+        self.cad_save_button.clicked.connect(self.save_cad_graph)
+        form.addWidget(convert, 3, 2)
+        form.addWidget(self.cad_save_button, 3, 3)
         layout.addWidget(contract)
-        return page
+
+        preview = panel()
+        preview_layout = QVBoxLayout(preview)
+        preview_layout.setContentsMargins(20, 17, 20, 17)
+        preview_header = QHBoxLayout()
+        preview_header.addWidget(section_title("DIRECTED CAD GRAPH", "변환 결과 미리보기", "휠 확대·축소, 드래그 이동, Node·Edge 마우스 확인을 지원합니다."))
+        preview_header.addStretch(1)
+        self.cad_graph_status = QLabel("DXF 파일을 선택해 주세요.")
+        self.cad_graph_status.setObjectName("GraphStatus")
+        self.cad_graph_status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.cad_graph_status.setWordWrap(True)
+        preview_header.addWidget(self.cad_graph_status)
+        preview_layout.addLayout(preview_header)
+        self.cad_graph_view = NetworkView()
+        self.cad_graph_view.setMinimumHeight(245)
+        self.cad_graph_view.set_graph(None)
+        preview_layout.addWidget(self.cad_graph_view, 1)
+        layout.addWidget(preview, 1)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(page)
+        return scroll
 
     def build_analysis(self) -> QWidget:
         page = QWidget()
@@ -685,8 +828,10 @@ class MainWindow(QMainWindow):
                 self.demand_path = path
             elif key == "cad":
                 self.cad_path = path
+                self.cad_graph_path = None
+                self.convert_cad_graph()
             self.refresh()
-        except (OSError, ValueError, json.JSONDecodeError) as error:
+        except (OSError, ValueError, json.JSONDecodeError, DxfConversionError) as error:
             QMessageBox.critical(self, "파일 오류", str(error))
 
     def refresh(self) -> None:
@@ -809,21 +954,80 @@ class MainWindow(QMainWindow):
             f"Run Fingerprint\n  {manifest.get('run_fingerprint', '—')}"
         )
 
-    def save_cad_contract(self) -> None:
+    def convert_cad_graph(self) -> None:
         if not self.cad_path:
-            QMessageBox.warning(self, "CAD 파일 필요", "CAD 원본을 먼저 선택해 주세요.")
+            QMessageBox.warning(self, "DXF 파일 필요", "CAD 원본에서 DXF 파일을 먼저 선택해 주세요.")
             return
-        contract = {
-            "schema_version": "0.1.0-prototype",
-            "contract_type": "cad-import-request",
-            "implementation_status": "ADAPTER_NOT_CONNECTED",
-            "source": {"file_name": self.cad_path.name, "extension": self.cad_path.suffix.lower(), "size_bytes": self.cad_path.stat().st_size},
-            "coordinate": {"source_unit": self.cad_unit.currentText(), "up_axis": "Z", "target_frame": "local-fab"},
-            "mapping": {"rail_center_layer": self.rail_layer.text(), "station_layer": self.station_layer.text(), "direction_layer": self.direction_layer.text()},
-        }
-        path, _ = QFileDialog.getSaveFileName(self, "CAD Import 계약 저장", "cad-import-contract.json", "JSON (*.json)")
-        if path:
-            Path(path).write_text(json.dumps(contract, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        layer_text = self.rail_layer.text().strip()
+        layers = [
+            item.strip()
+            for item in layer_text.replace(";", ",").split(",")
+            if item.strip()
+        ] or None
+        self.cad_graph_status.setText("DXF geometry를 Graph로 변환하는 중입니다…")
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            graph = convert_dxf_to_graph(
+                self.cad_path,
+                layers=layers,
+                arc_segments=int(self.arc_segments.currentText()),
+                coordinate_precision=int(self.coordinate_precision.currentText()),
+                coordinate_unit=self.cad_unit.currentText(),
+            )
+        except (DxfConversionError, OSError) as error:
+            self.cad_graph = None
+            self.cad_graph_path = None
+            self.cad_graph_view.set_graph(None)
+            self.cad_save_button.setEnabled(False)
+            self.cad_graph_status.setText(f"변환 실패\n{error}")
+            QMessageBox.critical(self, "DXF 변환 실패", str(error))
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+
+        self.cad_graph = graph
+        self.cad_graph_path = None
+        self.cad_graph_view.set_graph(graph)
+        self.cad_save_button.setEnabled(True)
+        metadata = graph["metadata"]
+        statistics = metadata["statistics"]
+        layers_text = ", ".join(metadata["selected_layers"])
+        self.cad_graph_status.setText(
+            f"{statistics['node_count']} Nodes  ·  {statistics['edge_count']} Edges  ·  "
+            f"{statistics['component_count']} Components\n"
+            f"방향 추정 {statistics['edge_count'] - statistics['unresolved_direction_count']} / {statistics['edge_count']}  ·  "
+            f"Layer {layers_text}  ·  저장 전"
+        )
+        self.cad_graph_status.setToolTip("방향은 CAD geometry 기반 추정값입니다. 실제 OHT 운행 방향과 대조가 필요합니다.")
+        self.statusBar().showMessage(
+            f"DXF Graph 변환 완료 · {statistics['node_count']} nodes / {statistics['edge_count']} edges",
+            8000,
+        )
+
+    def save_cad_graph(self) -> None:
+        if not self.cad_graph or not self.cad_path:
+            QMessageBox.warning(self, "변환 결과 필요", "DXF를 먼저 변환해 주세요.")
+            return
+        default_path = self.cad_path.with_suffix(".graph.json")
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Graph JSON 저장",
+            str(default_path),
+            "Graph JSON (*.json)",
+        )
+        if not path:
+            return
+        try:
+            self.cad_graph_path = write_graph_json(self.cad_graph, path)
+        except (DxfConversionError, OSError) as error:
+            QMessageBox.critical(self, "Graph 저장 실패", str(error))
+            return
+        statistics = self.cad_graph["metadata"]["statistics"]
+        self.cad_graph_status.setText(
+            f"{statistics['node_count']} Nodes  ·  {statistics['edge_count']} Edges  ·  "
+            f"{statistics['component_count']} Components\n저장 완료 · {self.cad_graph_path.name}"
+        )
+        self.statusBar().showMessage(f"Graph JSON 저장 완료 · {self.cad_graph_path}", 8000)
 
     def create_future_contract(self, kind: str) -> None:
         names = {"A5": "bottleneck-preview", "A6": "roi-reduction-request", "A7": "policy-ab-request", "DT": "digital-twin-projection-request"}
@@ -842,6 +1046,7 @@ class MainWindow(QMainWindow):
 STYLESHEET = """
 * { font-family: "Segoe UI", "Malgun Gothic"; font-size: 12px; color: #e8f3f7; }
 QMainWindow, #Body { background: #071019; }
+QScrollArea, QScrollArea > QWidget > QWidget { background: #071019; border: 0; }
 #Sidebar { background: #050d15; border-right: 1px solid #172834; }
 #Brand { color: #43e4d3; font-size: 16px; font-weight: 700; line-height: 1.4; }
 #NavButton { text-align: left; border: 0; border-radius: 10px; padding: 12px 13px; color: #8fa5b4; background: transparent; min-height: 22px; }
@@ -868,6 +1073,7 @@ QMainWindow, #Body { background: #071019; }
 #FileIcon { color: #43e4d3; font-size: 25px; background: #0b2a31; border: 1px solid #16434a; border-radius: 14px; padding: 12px; }
 #CardTitle { font-size: 14px; font-weight: 700; }
 #FileName { color: #607987; font-size: 9px; }
+#GraphStatus { color: #7edfd5; font-size: 10px; font-weight: 650; min-width: 360px; }
 #AvailableBadge, #PrototypeBadge { font-size: 8px; font-weight: 700; padding: 3px 7px; border-radius: 8px; }
 #AvailableBadge { color: #6ee7a5; background: #102c24; border: 1px solid #20503c; }
 #PrototypeBadge { color: #bba8ff; background: #251f3d; border: 1px solid #44386a; }

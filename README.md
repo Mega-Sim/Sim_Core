@@ -271,9 +271,10 @@ CLI 명령은 2차와 동일하며, `analyze` JSON report에 `edge_flows`·`node
 - 1차 결정론적 DES `validate`·`run`과 Run Manifest 확인
 - 2차 Cross-Domain `analyze`와 경로·진단 결과 확인
 - 3차 Edge/Node/Station Flow 지표와 레이아웃 Overlay 확인
-- CAD Import, Bottleneck/ROI, Policy A/B, Digital Twin의 후속 입력 계약 미리보기
+- DXF LINE·ARC를 방향성 Graph JSON으로 실제 변환하고 2D 화면에서 확인·저장
+- Bottleneck/ROI, Policy A/B, Digital Twin의 후속 입력 계약 미리보기
 
-CAD 변환과 5차 이후의 분석 기능은 아직 Core 계산 엔진에 연결하지 않았으며, 화면에서 `UI 프로토타입`으로 구분합니다. 실제 결과로 사용할 수 있는 기능은 `CORE 연결`로 표시된 1–3차 범위입니다.
+DXF Graph 변환은 데스크톱 앱 안에서 실제로 동작합니다. 다만 geometry 기반 방향은 추정값이므로 실제 OHT 방향 데이터와 대조가 필요하며, 생성된 Graph JSON을 Canonical Facility Model로 승격하는 Adapter는 후속 범위입니다. Bottleneck/ROI 등 나머지 5차 이후 분석 기능은 화면에서 `UI 프로토타입`으로 구분합니다.
 
 GitHub Actions의 `Sim_Core Native Desktop - Windows EXE` 결과에서 `Sim_Core_Flow_Workbench-windows-x64` Artifact를 내려받아 압축을 푼 뒤 `Sim_Core_Flow_Workbench.exe`를 실행하면 됩니다. 자세한 개발·패키징 방법은 [Native Desktop Workbench 안내](desktop/README.md)를 참고합니다.
 
