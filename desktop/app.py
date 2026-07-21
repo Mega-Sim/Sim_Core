@@ -258,6 +258,7 @@ class NetworkView(QGraphicsView):
     def __init__(self) -> None:
         super().__init__()
         self.setScene(QGraphicsScene(self))
+        self._white_canvas = False
         self.setRenderHint(QPainter.Antialiasing, True)
         self.setDragMode(QGraphicsView.ScrollHandDrag)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
@@ -267,6 +268,9 @@ class NetworkView(QGraphicsView):
         self.setObjectName("NetworkView")
 
     def drawBackground(self, painter: QPainter, rect: QRectF) -> None:  # noqa: N802
+        if self._white_canvas:
+            painter.fillRect(rect, QColor("#ffffff"))
+            return
         painter.fillRect(rect, QColor("#07131d"))
         painter.setPen(QPen(QColor(38, 65, 79, 80), 0))
         step = 42
@@ -286,6 +290,7 @@ class NetworkView(QGraphicsView):
         self.scale(factor, factor)
 
     def set_model(self, facility: Optional[Dict[str, Any]], analysis: Optional[Dict[str, Any]] = None) -> None:
+        self._white_canvas = False
         scene = self.scene()
         scene.clear()
         if not facility:
@@ -357,8 +362,9 @@ class NetworkView(QGraphicsView):
         self.fitInView(bounds, Qt.KeepAspectRatio)
 
     def set_graph(self, graph: Optional[Dict[str, Any]]) -> None:
-        """Render the Graph_Maker-compatible nodes/edges payload."""
+        """Render the Graph_Maker-compatible graph like the reference preview."""
 
+        self._white_canvas = True
         scene = self.scene()
         scene.clear()
         if not graph:
@@ -375,12 +381,27 @@ class NetworkView(QGraphicsView):
         ys = [float(node[1]) for node in raw_nodes]
         min_x, max_x = min(xs), max(xs)
         min_y, max_y = min(ys), max(ys)
-        scale = 900.0 / max(max_x - min_x, max_y - min_y, 1.0)
+        scale = 1100.0 / max(max_x - min_x, max_y - min_y, 1.0)
 
         def point(node_id: int) -> tuple[float, float]:
             raw = raw_nodes[node_id]
-            return (float(raw[0]) - min_x) * scale, -(float(raw[1]) - min_y) * scale
+            return (float(raw[0]) - min_x) * scale, (float(raw[1]) - min_y) * scale
 
+        def raw_point(raw: Any) -> tuple[float, float]:
+            return (float(raw[0]) - min_x) * scale, (float(raw[1]) - min_y) * scale
+
+        colors = [
+            QColor("#e41a1c"),
+            QColor("#ff7f00"),
+            QColor("#4daf4a"),
+            QColor("#377eb8"),
+            QColor("#984ea3"),
+            QColor("#00bcd4"),
+            QColor("#a6c900"),
+            QColor("#795548"),
+            QColor("#e377c2"),
+            QColor("#7f7f7f"),
+        ]
         for edge_id, edge in enumerate(graph.get("edges", [])):
             start_node = int(edge.get("start", -1))
             end_node = int(edge.get("end", -1))
@@ -393,11 +414,30 @@ class NetworkView(QGraphicsView):
                 and all(isinstance(value, int) for value in direction)
             )
             source_id, target_id = (direction if directed else [start_node, end_node])
-            x1, y1 = point(start_node)
-            x2, y2 = point(end_node)
             path = QPainterPath()
-            path.moveTo(x1, y1)
-            path.lineTo(x2, y2)
+            geometry = edge.get("geometry")
+            if isinstance(geometry, list) and len(geometry) >= 2:
+                first = raw_point(geometry[0])
+                path.moveTo(*first)
+                for raw in geometry[1:]:
+                    path.lineTo(*raw_point(raw))
+            else:
+                x1, y1 = point(start_node)
+                x2, y2 = point(end_node)
+                path.moveTo(x1, y1)
+                path.lineTo(x2, y2)
+            rail_item = QGraphicsPathItem(path)
+            rail_item.setPen(
+                QPen(
+                    colors[edge_id % len(colors)],
+                    3.2,
+                    Qt.SolidLine,
+                    Qt.RoundCap,
+                    Qt.RoundJoin,
+                )
+            )
+            rail_item.setZValue(1)
+            scene.addItem(rail_item)
 
             if directed:
                 source_x, source_y = point(int(source_id))
@@ -406,32 +446,51 @@ class NetworkView(QGraphicsView):
                 magnitude = math.hypot(delta_x, delta_y)
                 if magnitude > 0.1:
                     unit_x, unit_y = delta_x / magnitude, delta_y / magnitude
-                    marker_x = source_x + delta_x * 0.58
-                    marker_y = source_y + delta_y * 0.58
-                    arrow_size = min(7.0, max(3.0, magnitude * 0.24))
-                    wing = arrow_size * 0.58
+                    marker_x = source_x + delta_x * 0.62
+                    marker_y = source_y + delta_y * 0.62
+                    arrow_size = min(10.0, max(5.5, magnitude * 0.30))
+                    wing = arrow_size * 0.62
                     base_x = marker_x - unit_x * arrow_size
                     base_y = marker_y - unit_y * arrow_size
-                    path.moveTo(marker_x, marker_y)
-                    path.lineTo(base_x - unit_y * wing, base_y + unit_x * wing)
-                    path.moveTo(marker_x, marker_y)
-                    path.lineTo(base_x + unit_y * wing, base_y - unit_x * wing)
+                    arrow = QPainterPath()
+                    arrow.moveTo(marker_x, marker_y)
+                    arrow.lineTo(base_x - unit_y * wing, base_y + unit_x * wing)
+                    arrow.moveTo(marker_x, marker_y)
+                    arrow.lineTo(base_x + unit_y * wing, base_y - unit_x * wing)
+                    arrow_item = QGraphicsPathItem(arrow)
+                    arrow_item.setPen(
+                        QPen(
+                            QColor("#111111"),
+                            2.0,
+                            Qt.SolidLine,
+                            Qt.RoundCap,
+                            Qt.RoundJoin,
+                        )
+                    )
+                    arrow_item.setZValue(3)
+                    scene.addItem(arrow_item)
 
-            item = QGraphicsPathItem(path)
-            item.setPen(
-                QPen(
-                    QColor("#43e4d3") if directed else QColor("#ffb86b"),
-                    1.8,
-                    Qt.SolidLine if directed else Qt.DashLine,
-                    Qt.RoundCap,
-                    Qt.RoundJoin,
-                )
+            direction_text = f"{source_id} -> {target_id}" if directed else "방향 미결정"
+            rail_item.setToolTip(
+                f"Edge {edge_id}\n{start_node} - {end_node}\n{direction_text}"
             )
-            direction_text = f"{source_id} → {target_id}" if directed else "방향 미결정"
-            item.setToolTip(f"Edge {edge_id}\n{start_node} — {end_node}\n{direction_text}")
-            scene.addItem(item)
 
-        node_radius = 2.8 if len(raw_nodes) < 2000 else 1.8
+        metadata = graph.get("metadata", {})
+        label_scale = scale
+        for label in metadata.get("labels", []):
+            try:
+                x = (float(label["x"]) - min_x) * label_scale
+                y = (float(label["y"]) - min_y) * label_scale
+            except (KeyError, TypeError, ValueError):
+                continue
+            text = QGraphicsSimpleTextItem(str(label.get("text", "")))
+            text.setBrush(QColor("#333333"))
+            text.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
+            text.setPos(x - 35, y - 18)
+            text.setZValue(4)
+            scene.addItem(text)
+
+        node_radius = 3.5 if len(raw_nodes) < 2000 else 2.1
         for node_id in range(len(raw_nodes)):
             x, y = point(node_id)
             dot = QGraphicsEllipseItem(
@@ -440,15 +499,28 @@ class NetworkView(QGraphicsView):
                 node_radius * 2,
                 node_radius * 2,
             )
-            dot.setBrush(QColor("#0b1b27"))
-            dot.setPen(QPen(QColor("#8fb8c7"), 1))
-            dot.setToolTip(f"Node {node_id}\n({raw_nodes[node_id][0]}, {raw_nodes[node_id][1]})")
+            dot.setBrush(QColor("#ff0000"))
+            dot.setPen(QPen(QColor("#ff0000"), 1))
+            dot.setZValue(2)
+            dot.setToolTip(
+                f"Node {node_id}\n({raw_nodes[node_id][0]}, {raw_nodes[node_id][1]})"
+            )
             scene.addItem(dot)
 
-        bounds = scene.itemsBoundingRect().adjusted(-35, -35, 35, 35)
+        border = QGraphicsPathItem()
+        border_path = QPainterPath()
+        border_rect = scene.itemsBoundingRect().adjusted(-28, -18, 28, 18)
+        border_path.addRect(border_rect)
+        border.setPath(border_path)
+        border.setPen(QPen(QColor("#222222"), 18))
+        border.setZValue(-1)
+        scene.addItem(border)
+
+        bounds = scene.itemsBoundingRect().adjusted(-20, -20, 20, 20)
         scene.setSceneRect(bounds)
         self.resetTransform()
         self.fitInView(bounds, Qt.KeepAspectRatio)
+        return
 
 
 class MainWindow(QMainWindow):

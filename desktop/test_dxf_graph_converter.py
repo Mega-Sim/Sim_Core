@@ -58,6 +58,79 @@ class DxfGraphConverterTest(unittest.TestCase):
         self.assertEqual(statistics["unresolved_direction_count"], 0)
         self.assertEqual(graph["metadata"]["selected_layers"], ["OHT_RAIL_CENTER"])
         self.assertTrue(all(edge["dir"] is not None for edge in graph["edges"]))
+        self.assertEqual(graph["metadata"]["labels"][0]["text"], "EQ-01")
+
+    def test_degree_two_midpoints_keep_one_in_and_one_out(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "opposing-thread-layout.dxf"
+            document = ezdxf.new("R2013")
+            model = document.modelspace()
+            model.add_line((10, 0), (20, 0))
+            model.add_line((0, 0), (10, 0))
+            document.saveas(path)
+            graph = convert_dxf_to_graph(path)
+
+        in_degree = [0 for _ in graph["nodes"]]
+        out_degree = [0 for _ in graph["nodes"]]
+        undirected_degree = [0 for _ in graph["nodes"]]
+        for edge in graph["edges"]:
+            direction_start, direction_end = edge["dir"]
+            out_degree[direction_start] += 1
+            in_degree[direction_end] += 1
+            undirected_degree[edge["start"]] += 1
+            undirected_degree[edge["end"]] += 1
+
+        for node, degree in enumerate(undirected_degree):
+            if degree == 2:
+                self.assertEqual(in_degree[node], 1)
+                self.assertEqual(out_degree[node], 1)
+
+    def test_touching_endpoint_splits_mainline_into_junction(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "branch-layout.dxf"
+            document = ezdxf.new("R2013")
+            model = document.modelspace()
+            model.add_line((0, 0), (20, 0))
+            model.add_line((10, 10), (10, 0))
+            document.saveas(path)
+            graph = convert_dxf_to_graph(path)
+
+        junctions = []
+        incident = [[] for _ in graph["nodes"]]
+        for index, edge in enumerate(graph["edges"]):
+            incident[edge["start"]].append(index)
+            incident[edge["end"]].append(index)
+        for node, linked_edges in enumerate(incident):
+            if graph["nodes"][node] == [10.0, 0.0]:
+                junctions.append((node, linked_edges))
+
+        self.assertEqual(len(junctions), 1)
+        junction, linked_edges = junctions[0]
+        self.assertEqual(len(linked_edges), 3)
+        outgoing = sum(1 for index in linked_edges if graph["edges"][index]["dir"][0] == junction)
+        incoming = sum(1 for index in linked_edges if graph["edges"][index]["dir"][1] == junction)
+        self.assertGreater(outgoing, 0)
+        self.assertGreater(incoming, 0)
+
+    def test_forward_branch_continues_from_one_seed_thread(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "forward-branch-layout.dxf"
+            document = ezdxf.new("R2013")
+            model = document.modelspace()
+            model.add_line((0, 0), (10, 0))
+            model.add_line((10, 0), (20, 0))
+            model.add_line((10, 0), (20, 5))
+            document.saveas(path)
+            graph = convert_dxf_to_graph(path)
+
+        junction = graph["nodes"].index([10.0, 0.0])
+        outgoing = [
+            edge
+            for edge in graph["edges"]
+            if edge["dir"][0] == junction
+        ]
+        self.assertEqual(graph["metadata"]["statistics"]["direction_thread_count"], 1)
+        self.assertEqual(len(outgoing), 2)
 
     def test_missing_layer_reports_available_geometry_layers(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -65,7 +138,7 @@ class DxfGraphConverterTest(unittest.TestCase):
             with self.assertRaisesRegex(DxfConversionError, "OHT_RAIL_CENTER"):
                 convert_dxf_to_graph(source, layers=["DOES_NOT_EXIST"])
 
-    def test_wrapped_arc_preserves_reference_signed_sweep(self) -> None:
+    def test_wrapped_arc_uses_dxf_counterclockwise_sweep(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "wrapped-arc.dxf"
             document = ezdxf.new("R2013")
@@ -79,7 +152,7 @@ class DxfGraphConverterTest(unittest.TestCase):
             segments = load_dxf_lines(path, arc_segments=10)
 
         approximated_length = sum(math.dist(start, end) for start, end in segments)
-        self.assertGreater(approximated_length, 50)
+        self.assertLess(approximated_length, 5)
 
     def test_saved_json_is_deterministic_and_compatible(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -92,7 +165,7 @@ class DxfGraphConverterTest(unittest.TestCase):
             payload = json.loads(first.read_text(encoding="utf-8"))
 
         self.assertIsInstance(payload["nodes"][0], list)
-        self.assertEqual(set(payload["edges"][0]), {"start", "end", "dir"})
+        self.assertEqual(set(payload["edges"][0]), {"start", "end", "dir", "geometry"})
         self.assertEqual(
             payload["metadata"]["converter"]["reference_repository"],
             "Mega-Sim/Graph_Maker_CAD-dxf-_to_json",

@@ -23,6 +23,7 @@ import ezdxf
 CONVERTER_NAME = "sim-core-dxf-graph"
 CONVERTER_VERSION = "1.0.0"
 SUPPORTED_ENTITY_TYPES = ("LINE", "ARC")
+MIN_CONTINUATION_DOT = -0.15
 
 Point = tuple[float, float]
 Segment = tuple[Point, Point]
@@ -39,6 +40,7 @@ class DxfLoadResult:
     available_geometry_layers: list[str]
     entity_counts: dict[str, int]
     ignored_entity_counts: dict[str, int]
+    labels: list[dict[str, Any]]
 
 
 def _vector(start: Point, end: Point) -> Point:
@@ -64,6 +66,75 @@ def _dot(left: Point, right: Point) -> float:
     return left[0] * right[0] + left[1] * right[1]
 
 
+def _distance(left: Point, right: Point) -> float:
+    return math.hypot(left[0] - right[0], left[1] - right[1])
+
+
+def _point_on_segment_parameter(
+    point: Point,
+    start: Point,
+    end: Point,
+    *,
+    tolerance: float,
+) -> float | None:
+    vector = _vector(start, end)
+    length_squared = vector[0] * vector[0] + vector[1] * vector[1]
+    if length_squared == 0:
+        return None
+    offset = _vector(start, point)
+    parameter = _dot(offset, vector) / length_squared
+    if parameter <= tolerance or parameter >= 1.0 - tolerance:
+        return None
+    projection = (
+        start[0] + vector[0] * parameter,
+        start[1] + vector[1] * parameter,
+    )
+    if _distance(point, projection) > tolerance:
+        return None
+    return parameter
+
+
+def _split_segments_at_touching_endpoints(
+    segments: Sequence[Segment],
+    *,
+    tolerance: float,
+) -> list[Segment]:
+    """Split a segment when another segment endpoint lies on its interior.
+
+    CAD rail branches are often drawn as a connector endpoint touching the
+    middle of a long LINE instead of splitting that LINE entity.  Without this
+    normalization the graph has no junction node, so each side can get an
+    independent direction and appear as an impossible dead-end.
+    """
+
+    endpoints: list[Point] = []
+    for start, end in segments:
+        endpoints.extend((start, end))
+
+    split_segments: list[Segment] = []
+    for start, end in segments:
+        cuts: list[tuple[float, Point]] = [(0.0, start), (1.0, end)]
+        for point in endpoints:
+            parameter = _point_on_segment_parameter(
+                point, start, end, tolerance=tolerance
+            )
+            if parameter is not None:
+                cuts.append((parameter, point))
+
+        cuts.sort(key=lambda item: item[0])
+        deduplicated: list[tuple[float, Point]] = []
+        for parameter, point in cuts:
+            if deduplicated and abs(parameter - deduplicated[-1][0]) <= tolerance:
+                continue
+            deduplicated.append((parameter, point))
+
+        for (_, first), (_, second) in zip(deduplicated, deduplicated[1:]):
+            if _distance(first, second) > tolerance:
+                split_segments.append((first, second))
+
+    return split_segments
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -84,7 +155,10 @@ def _arc_points(entity: Any, steps: int) -> list[Point]:
     radius = float(entity.dxf.radius)
     start_angle = float(entity.dxf.start_angle)
     end_angle = float(entity.dxf.end_angle)
-    sweep = math.radians(end_angle - start_angle)
+    sweep_degrees = end_angle - start_angle
+    if sweep_degrees <= 0:
+        sweep_degrees += 360.0
+    sweep = math.radians(sweep_degrees)
     start_radians = math.radians(start_angle)
     return [
         (
@@ -132,6 +206,7 @@ def load_dxf_geometry(
 
     requested_layers = _normalized_layers(layers)
     segments: list[Segment] = []
+    labels: list[dict[str, Any]] = []
     entity_counts: Counter[str] = Counter()
     ignored_counts: Counter[str] = Counter()
     available_layers: set[str] = set()
@@ -142,6 +217,22 @@ def load_dxf_geometry(
         layer = str(entity.dxf.layer)
         if entity_type in SUPPORTED_ENTITY_TYPES:
             available_layers.add(layer)
+        if entity_type in {"TEXT", "MTEXT"}:
+            ignored_counts[entity_type] += 1
+            try:
+                insert = entity.dxf.insert
+                text = entity.plain_text() if entity_type == "MTEXT" else entity.dxf.text
+            except (AttributeError, ValueError):
+                continue
+            labels.append(
+                {
+                    "text": str(text).strip(),
+                    "x": float(insert.x),
+                    "y": float(insert.y),
+                    "layer": layer,
+                }
+            )
+            continue
         if entity_type not in SUPPORTED_ENTITY_TYPES:
             ignored_counts[entity_type] += 1
             continue
@@ -174,6 +265,7 @@ def load_dxf_geometry(
         available_geometry_layers=sorted(available_layers, key=str.casefold),
         entity_counts=dict(sorted(entity_counts.items())),
         ignored_entity_counts=dict(sorted(ignored_counts.items())),
+        labels=[label for label in labels if label["text"]],
     )
 
 
@@ -215,12 +307,24 @@ def build_nodes_edges(
             nodes.append([key[0], key[1]])
         return node_map[key]
 
-    for start, end in segments:
+    snap_tolerance = 10 ** (-coordinate_precision)
+    normalized_segments = _split_segments_at_touching_endpoints(
+        segments, tolerance=snap_tolerance
+    )
+
+    for start, end in normalized_segments:
         start_node = get_node(start)
         end_node = get_node(end)
         if start_node == end_node:
             continue
-        edges.append({"start": start_node, "end": end_node, "dir": None})
+        edges.append(
+            {
+                "start": start_node,
+                "end": end_node,
+                "dir": None,
+                "geometry": [nodes[start_node], nodes[end_node]],
+            }
+        )
 
     if not edges:
         raise DxfConversionError("좌표 반올림 후 유효한 Edge가 남지 않았습니다.")
@@ -285,18 +389,120 @@ def build_directed_graph(
                 ranked.append((score, candidate, pair, vector))
 
             ranked.sort(key=lambda item: (-item[0], item[1]))
+            if ranked[0][0] < MIN_CONTINUATION_DOT:
+                continue
             _, best_id, best_pair, _ = ranked[0]
             directed[best_id]["dir"] = best_pair
             queue.append(best_id)
 
-            for _, candidate, pair, vector in ranked[1:]:
-                if _sign(previous[0]) == _sign(vector[0]) and _sign(
-                    previous[1]
-                ) == _sign(vector[1]):
+            for score, candidate, pair, _ in ranked[1:]:
+                if score >= MIN_CONTINUATION_DOT:
                     directed[candidate]["dir"] = pair
                     queue.append(candidate)
 
+    _smooth_degree_two_direction_chains(directed, len(nodes))
     return directed, thread_count
+
+
+def _smooth_degree_two_direction_chains(
+    edges: list[dict[str, Any]],
+    node_count: int,
+) -> None:
+    """Orient degree-2 rail chains as continuous paths.
+
+    The prototype direction thread works well while it can keep extending from
+    one seed edge.  When we restart the thread to cover every remaining branch
+    or disconnected span, two restarted threads can meet at an ordinary rail
+    midpoint and create a local source/sink.  A degree-2 rail midpoint should
+    have exactly one incoming and one outgoing directed edge, so this pass
+    collapses maximal degree-2 chains and orients each chain continuously.
+    """
+
+    incident: list[list[int]] = [[] for _ in range(node_count)]
+    for edge_id, edge in enumerate(edges):
+        incident[int(edge["start"])].append(edge_id)
+        incident[int(edge["end"])].append(edge_id)
+
+    visited_edges: set[int] = set()
+
+    def other_node(edge_id: int, node: int) -> int:
+        edge = edges[edge_id]
+        start, end = int(edge["start"]), int(edge["end"])
+        return end if start == node else start
+
+    def set_chain_direction(edge_ids: list[int], node_path: list[int]) -> None:
+        if not edge_ids:
+            return
+        forward_score = 0
+        reverse_score = 0
+        for index, edge_id in enumerate(edge_ids):
+            direction = edges[edge_id].get("dir")
+            if direction == [node_path[index], node_path[index + 1]]:
+                forward_score += 1
+            elif direction == [node_path[index + 1], node_path[index]]:
+                reverse_score += 1
+        if reverse_score > forward_score:
+            node_path = list(reversed(node_path))
+            edge_ids = list(reversed(edge_ids))
+        for index, edge_id in enumerate(edge_ids):
+            edges[edge_id]["dir"] = [node_path[index], node_path[index + 1]]
+
+    anchors = [node for node, linked in enumerate(incident) if len(linked) != 2]
+    for anchor in anchors:
+        for first_edge in incident[anchor]:
+            if first_edge in visited_edges:
+                continue
+            edge_ids = [first_edge]
+            node_path = [anchor, other_node(first_edge, anchor)]
+            visited_edges.add(first_edge)
+
+            previous = anchor
+            current = node_path[-1]
+            while len(incident[current]) == 2:
+                next_edges = [edge for edge in incident[current] if edge not in visited_edges]
+                if not next_edges:
+                    break
+                next_edge = next_edges[0]
+                visited_edges.add(next_edge)
+                edge_ids.append(next_edge)
+                next_node = other_node(next_edge, current)
+                node_path.append(next_node)
+                previous, current = current, next_node
+                if current == previous:
+                    break
+
+            set_chain_direction(edge_ids, node_path)
+
+    # Closed loops have no anchor because every node has degree 2.
+    for first_edge in range(len(edges)):
+        if first_edge in visited_edges:
+            continue
+        start = int(edges[first_edge]["start"])
+        edge_ids = [first_edge]
+        node_path = [start, other_node(first_edge, start)]
+        visited_edges.add(first_edge)
+
+        previous = start
+        current = node_path[-1]
+        while current != start:
+            next_edges = [
+                edge
+                for edge in incident[current]
+                if edge not in visited_edges and other_node(edge, current) != previous
+            ]
+            if not next_edges:
+                next_edges = [edge for edge in incident[current] if edge not in visited_edges]
+            if not next_edges:
+                break
+            next_edge = next_edges[0]
+            visited_edges.add(next_edge)
+            edge_ids.append(next_edge)
+            next_node = other_node(next_edge, current)
+            node_path.append(next_node)
+            previous, current = current, next_node
+
+        if len(node_path) == len(edge_ids) + 1:
+            set_chain_direction(edge_ids, node_path)
 
 
 def _component_count(node_count: int, edges: Sequence[dict[str, Any]]) -> int:
@@ -386,6 +592,7 @@ def convert_dxf_to_graph(
             "available_geometry_layers": loaded.available_geometry_layers,
             "entity_counts": loaded.entity_counts,
             "ignored_entity_counts": loaded.ignored_entity_counts,
+            "labels": loaded.labels,
             "arc_segments": arc_segments,
             "coordinate_precision": coordinate_precision,
             "direction_inference": {
