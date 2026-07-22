@@ -1,2 +1,0 @@
-/usr/bin/ar qc libsim_core.a CMakeFiles/sim_core.dir/src/application/simulation.cpp.o CMakeFiles/sim_core.dir/src/domain/state.cpp.o CMakeFiles/sim_core.dir/src/kernel/event_queue.cpp.o CMakeFiles/sim_core.dir/src/kernel/simulation_time.cpp.o CMakeFiles/sim_core.dir/src/model/json_loader.cpp.o CMakeFiles/sim_core.dir/src/model/validator.cpp.o CMakeFiles/sim_core.dir/src/observability/event_trace.cpp.o CMakeFiles/sim_core.dir/src/observability/replay.cpp.o CMakeFiles/sim_core.dir/src/routing/dijkstra_router.cpp.o
-/usr/bin/ranlib libsim_core.a
