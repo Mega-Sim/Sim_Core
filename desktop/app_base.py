@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
+    QSpinBox,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -52,10 +53,12 @@ from dxf_graph_converter import (
     convert_dxf_to_graph,
     save_graph as write_graph_json,
 )
+from random_flow_analysis import default_generated_output_root
+from random_flow_ui import RandomWorkloadWorker, show_random_flow_dialog
 
 
-APP_VERSION = "0.3.0"
-BRANCH_NAME = "agent/Make-Graph-file-from-CAD-Layout-file"
+APP_VERSION = "0.4.0"
+BRANCH_NAME = "feature/랜덤-FromTo-LA-정적분석"
 
 
 def runtime_root() -> Path:
@@ -538,6 +541,8 @@ class MainWindow(QMainWindow):
         self.scenario: Optional[Dict[str, Any]] = None
         self.analysis: Optional[Dict[str, Any]] = None
         self.cad_graph: Optional[Dict[str, Any]] = None
+        self._random_flow_worker: Optional[RandomWorkloadWorker] = None
+        self._random_flow_dialog = None
         self.last_manifest: Optional[Dict[str, Any]] = None
         self.core = find_core()
         self.current_action = ""
@@ -704,6 +709,45 @@ class MainWindow(QMainWindow):
             self.file_cards[definition[0]] = card
             cards.addWidget(card)
         layout.addLayout(cards)
+
+        random_flow = panel()
+        random_form = QGridLayout(random_flow)
+        random_form.setContentsMargins(22, 19, 22, 19)
+        random_form.setHorizontalSpacing(12)
+        random_form.setVerticalSpacing(8)
+        random_form.addWidget(
+            section_title(
+                "LAYOUT-ONLY RANDOM FLOW",
+                "랜덤 From-To 생성 · LA 정적분석",
+                "현재 Facility의 Station과 방향성 Edge만으로 1시간 반송 Scenario를 만들고, 최단경로 통행량을 초록→빨강 Heatmap으로 표시합니다.",
+            ),
+            0,
+            0,
+            1,
+            4,
+        )
+        self.random_moves_per_hour = QSpinBox()
+        self.random_moves_per_hour.setRange(1, 10_000)
+        self.random_moves_per_hour.setValue(100)
+        self.random_moves_per_hour.setGroupSeparatorShown(True)
+        self.random_seed = QSpinBox()
+        self.random_seed.setRange(1, 2_147_483_647)
+        self.random_seed.setValue(20_260_723)
+        self.random_seed.setGroupSeparatorShown(False)
+        random_form.addWidget(styled_label("시간당 총 반송수", "FieldLabel"), 1, 0)
+        random_form.addWidget(styled_label("Random Seed (재현용)", "FieldLabel"), 1, 1)
+        random_form.addWidget(self.random_moves_per_hour, 2, 0)
+        random_form.addWidget(self.random_seed, 2, 1)
+        self.random_flow_status = QLabel("Facility JSON을 연결하면 Station 기준 랜덤 수요를 생성할 수 있습니다.")
+        self.random_flow_status.setObjectName("GraphStatus")
+        self.random_flow_status.setWordWrap(True)
+        self.random_flow_generate_button = button("랜덤 From-To 생성 · 정적분석", "primary")
+        self.random_flow_generate_button.clicked.connect(self.generate_random_flow)
+        random_form.addWidget(self.random_flow_status, 1, 2, 2, 1)
+        random_form.addWidget(self.random_flow_generate_button, 1, 3, 2, 1)
+        random_form.setColumnStretch(2, 1)
+        layout.addWidget(random_flow)
+
         contract = panel()
         form = QGridLayout(contract)
         form.setContentsMargins(22, 19, 22, 19)
@@ -912,6 +956,16 @@ class MainWindow(QMainWindow):
         self.metric_edges.set_value(len(facility.get("edges", [])))
         self.metric_stations.set_value(len(facility.get("stations", [])))
         self.metric_demands.set_value(demand_count(self.demand_path, self.scenario))
+        if hasattr(self, "random_flow_status") and self._random_flow_worker is None:
+            if facility:
+                self.random_flow_status.setText(
+                    f"분석 대상 · {facility.get('model_id', 'Facility')} · "
+                    f"Station {len(facility.get('stations', [])):,}개"
+                )
+            else:
+                self.random_flow_status.setText(
+                    "Facility JSON을 연결하면 Station 기준 랜덤 수요를 생성할 수 있습니다."
+                )
         self.network.set_model(self.facility, self.analysis)
         self.core_status.setText("●  Core 실행 가능" if self.core else "●  Core 미탑재")
         self.core_status.setProperty("ready", bool(self.core))
@@ -927,6 +981,89 @@ class MainWindow(QMainWindow):
             f"Master Seed\n  {scenario.get('master_seed', '—')}"
         )
         self.render_analysis()
+
+    def generate_random_flow(self) -> None:
+        if self._random_flow_worker is not None and self._random_flow_worker.isRunning():
+            QMessageBox.information(self, "생성 중", "현재 랜덤 From-To 경로 계산이 끝날 때까지 기다려 주세요.")
+            return
+        if not self.facility:
+            QMessageBox.warning(
+                self,
+                "Facility JSON 필요",
+                "Node, Edge, Station이 포함된 Facility JSON을 먼저 연결해 주세요. "
+                "DXF Graph만으로는 Station ID와 연결 Node를 확정할 수 없습니다.",
+            )
+            self.switch_page(1)
+            return
+        stations = self.facility.get("stations", [])
+        if not isinstance(stations, list) or len(stations) < 2:
+            QMessageBox.warning(self, "Station 부족", "랜덤 From-To 생성에는 Station이 2개 이상 필요합니다.")
+            return
+
+        moves = self.random_moves_per_hour.value()
+        seed = self.random_seed.value()
+        model_name = str(
+            self.facility.get("model_id")
+            or (self.facility_path.stem if self.facility_path else "facility")
+        )
+        self.random_flow_generate_button.setEnabled(False)
+        self.random_flow_generate_button.setText("경로 계산 중…")
+        self.random_flow_status.setText(
+            f"{len(stations):,}개 Station의 도달 가능한 방향성 경로를 계산하고 있습니다…"
+        )
+        self.statusBar().showMessage("랜덤 From-To 생성 및 LA 정적분석 중…")
+        worker = RandomWorkloadWorker(
+            self.facility,
+            moves,
+            seed,
+            default_generated_output_root(),
+            model_name,
+            self,
+        )
+        self._random_flow_worker = worker
+        worker.completed.connect(self._random_flow_ready)
+        worker.failed.connect(self._random_flow_failed)
+        worker.finished.connect(self._random_flow_finished)
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _random_flow_ready(self, payload: object) -> None:
+        workload, saved = payload  # type: ignore[misc]
+        self.scenario = workload.scenario
+        self.analysis = workload.analysis
+        self.scenario_path = saved.scenario_json_path
+        self.demand_path = saved.demand_csv_path
+        if hasattr(self, "file_cards"):
+            self.file_cards["scenario"].set_path(self.scenario_path)
+            self.file_cards["demand"].set_path(self.demand_path)
+        self.refresh()
+        excluded = len(workload.excluded_station_ids)
+        excluded_text = f" · 경로 없는 Station {excluded}개 제외" if excluded else ""
+        self.random_flow_status.setText(
+            f"{workload.moves_per_hour:,} moves/h · OD {len(workload.demands):,}개 · "
+            f"도달 가능 Station 쌍 {workload.reachable_pair_count:,}개{excluded_text}\n"
+            f"Scenario/CSV 저장 완료 · {saved.directory.name}"
+        )
+        self.statusBar().showMessage(
+            f"랜덤 From-To 및 LA 정적분석 완료 · {saved.directory}",
+            10_000,
+        )
+        self._random_flow_dialog = show_random_flow_dialog(
+            self,
+            self.facility or {},
+            workload,
+            saved,
+        )
+
+    def _random_flow_failed(self, message: str) -> None:
+        self.random_flow_status.setText(f"생성 실패 · {message}")
+        self.statusBar().showMessage("랜덤 From-To 생성 실패", 8_000)
+        QMessageBox.critical(self, "랜덤 From-To 생성 실패", message)
+
+    def _random_flow_finished(self) -> None:
+        self.random_flow_generate_button.setEnabled(True)
+        self.random_flow_generate_button.setText("랜덤 From-To 생성 · 정적분석")
+        self._random_flow_worker = None
 
     def run_core(self, action: str) -> None:
         if self.process.state() != QProcess.ProcessState.NotRunning:
@@ -1153,8 +1290,8 @@ QPushButton { border: 1px solid #294452; border-radius: 9px; padding: 8px 14px; 
 QPushButton:hover { border-color: #43e4d3; background: #153241; }
 QPushButton[kind="primary"] { color: #021311; background: #43e4d3; border-color: #5af1e1; }
 QPushButton[kind="primary"]:hover { background: #62eee0; }
-QLineEdit, QComboBox { background: #07151f; border: 1px solid #294452; border-radius: 8px; padding: 8px; min-height: 20px; }
-QLineEdit:focus, QComboBox:focus { border-color: #43e4d3; }
+QLineEdit, QComboBox, QSpinBox { background: #07151f; border: 1px solid #294452; border-radius: 8px; padding: 8px; min-height: 20px; }
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus { border-color: #43e4d3; }
 #FieldLabel { color: #8ca3b3; font-size: 9px; }
 #NetworkView { border-radius: 10px; background: #07131d; }
 QTableWidget { background: #091722; alternate-background-color: #0c1d29; border: 0; gridline-color: #1b3240; selection-background-color: #16454d; }

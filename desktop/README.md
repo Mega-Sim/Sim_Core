@@ -54,15 +54,35 @@ dist\Sim_Core_Flow_Workbench.exe
 | `sim-core validate` | 실제 Core 연결 |
 | `sim-core analyze` | 실제 Core 연결 |
 | `sim-core run` | 실제 Core 연결 |
+| Facility Station 기반 랜덤 From-To/Scenario 생성 | 네이티브 구현 |
+| 방향성 Dijkstra Edge 통행량 Heatmap 팝업 | 네이티브 구현 |
 | DXF → 방향성 Graph JSON | 실제 변환·화면 미리보기·저장 연결 |
 | Graph 전용 확대 팝업 | 네이티브 구현 |
 | Edge 클릭·드래그 블록 선택 | 네이티브 구현 |
 | 선택 Edge 방향 반전 | Graph JSON에 반영 |
 | Bottleneck/ROI/Policy A-B/Digital Twin | 프로토타입 계약, Core 미연결 |
 
-실행 결과는 `%USERPROFILE%\Documents\Sim_Core\Runs` 아래에 실행별로 저장됩니다.
+실행 결과는 `%USERPROFILE%\Documents\Sim_Core\Runs` 아래에 실행별로 저장됩니다. 랜덤 From-To 생성 결과는 `%USERPROFILE%\Documents\Sim_Core\Generated` 아래의 새 폴더에 CSV, Scenario JSON, LA 분석 JSON으로 함께 저장되며 기존 결과를 덮어쓰지 않습니다.
 
-Windows 패키징 과정에서는 `desktop/smoke_test.py`와 `desktop/graph_ui_smoke_test.py`를 실행해 기본 Workbench와 Graph UI 개선 기능을 자동 확인합니다.
+Windows 패키징 과정에서는 DXF 변환, 랜덤 From-To, C++ Core, 기본 Workbench, Graph UI 및 Heatmap 팝업 시험을 모두 실행합니다.
+
+## 레이아웃만으로 랜덤 반송 분석·시뮬레이션하기
+
+1. 왼쪽에서 `입력 · CAD`를 열고 Node, 방향성 Edge, Station이 포함된 `Facility JSON`을 선택합니다.
+2. `시간당 총 반송수`를 입력합니다. 예를 들어 `1,000`이면 1시간 동안 1,000건의 Job을 생성합니다(최대 10,000건).
+3. 필요하면 재현용 `Random Seed`를 바꿉니다. 같은 Facility·반송수·Seed는 항상 같은 From-To를 만듭니다.
+4. `랜덤 From-To 생성 · 정적분석`을 누릅니다.
+5. 방향성으로 도달 가능한 서로 다른 Station 쌍에서 활성 OD를 무작위 선택하고, 총 반송수를 그 OD들에 무작위 배분합니다. 중복 From-To는 CSV에서 하나의 OD 수요로 합산합니다.
+6. 팝업에서 모든 Edge를 확인합니다. 통행량이 낮거나 0인 Edge는 초록색, 최대 통행량 Edge는 빨간색이며 중간 부하는 노란색을 거칩니다.
+7. 생성된 Scenario와 From-To CSV는 화면 입력에 자동 연결됩니다. 이후 `시뮬레이션`에서 그대로 실행하거나 `Flow 분석`에서 Core 결과를 다시 확인할 수 있습니다.
+
+최단경로는 Core와 동일하게 Edge 자유주행시간을 비용으로 사용하는 방향성 Dijkstra로 계산하며, 비용이 같은 경로는 Edge ID 순서로 결정론적으로 선택합니다. 방향 때문에 어떤 다른 Station에도 갈 수 없는 Station은 랜덤 후보에서 제외하고 화면에 제외 개수를 표시합니다. DXF Graph에는 Station ID와 연결 Node 계약이 없으므로 이 기능은 Canonical Facility JSON을 기준으로 동작합니다.
+
+자동 생성 Scenario는 임의의 Fleet 규모가 분석 결과를 바꾸지 않도록 Job마다 From Station에 대기 중인 합성 Vehicle 1대를 배치합니다. 따라서 이 Scenario는 레이아웃 방향·경로와 Core 실행 가능성을 확인하기 위한 것이며, 필요한 실제 OHT 대수나 Dispatch 성능을 산정하는 Fleet-sizing 결과로 사용하면 안 됩니다. Job은 첫 1시간에 투입되고, 마지막 Job이 이동·Load·Unload를 끝낼 수 있는 최소 정리시간을 Scenario 종료시간에 자동으로 더합니다.
+
+대형 레이아웃의 메모리와 분석 파일 크기가 반송수에 비례해 폭증하지 않도록 활성 OD는 `Station 수 × 4`를 기본으로 최소 64개, 최대 1,000개까지만 선택합니다(도달 가능한 OD 또는 총 반송수가 더 적으면 그 수가 상한). 입력한 총 반송수와 생성 Job 수는 줄이지 않고 선택된 OD별 빈도로 합산합니다.
+
+저장되는 `random_la_analysis.json`에는 Heatmap 재현에 필요한 Edge 집계, OD별 거리·시간·Edge 개수는 남기되 수천 개의 Edge ID 경로 배열과 Edge별 기여 OD ID 반복 목록은 중복 저장하지 않습니다. 전체 경로가 필요하면 함께 저장된 Scenario와 From-To CSV를 `sim-core analyze`에 입력해 동일 Seed 경로를 다시 산출할 수 있습니다.
 
 ## DXF Graph 만들기
 
@@ -94,4 +114,5 @@ py desktop\dxf_graph_converter.py layout.dxf `
 
 ```powershell
 py desktop\test_dxf_graph_converter.py
+py desktop\test_random_flow_analysis.py
 ```

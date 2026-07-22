@@ -21,6 +21,10 @@ $Python = if (Get-Command python -ErrorAction SilentlyContinue) {
 if ($LASTEXITCODE -ne 0) {
     throw "DXF graph converter tests failed."
 }
+& $Python desktop\test_random_flow_analysis.py
+if ($LASTEXITCODE -ne 0) {
+    throw "Random From-To static analysis tests failed."
+}
 
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release --parallel
@@ -32,6 +36,10 @@ if (-not (Test-Path $CoreBinary)) {
 
 $env:SIM_CORE_BIN = $CoreBinary
 $env:QT_QPA_PLATFORM = "offscreen"
+& $Python desktop\random_flow_core_smoke_test.py
+if ($LASTEXITCODE -ne 0) {
+    throw "Random From-To C++ Core cross-check failed."
+}
 & $Python desktop\smoke_test.py
 if ($LASTEXITCODE -ne 0) {
     throw "Native desktop smoke test failed."
@@ -39,6 +47,10 @@ if ($LASTEXITCODE -ne 0) {
 & $Python desktop\graph_ui_smoke_test.py
 if ($LASTEXITCODE -ne 0) {
     throw "Graph UI enhancement smoke test failed."
+}
+& $Python desktop\random_flow_ui_smoke_test.py
+if ($LASTEXITCODE -ne 0) {
+    throw "Random From-To heatmap UI smoke test failed."
 }
 
 $PyInstallerArgs = @(
