@@ -23,7 +23,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 & $Python desktop\test_automod_pm_converter.py
 if ($LASTEXITCODE -ne 0) {
-    throw "AutoMod pm.asy converter tests failed."
+    throw "AutoMod model.arc converter tests failed."
 }
 
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64

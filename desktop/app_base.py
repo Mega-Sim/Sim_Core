@@ -47,7 +47,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from automod_pm_converter import AutoModConversionError, save_pm_asy
+from automod_pm_converter import AutoModConversionError, save_automod_model
 from dxf_graph_converter import (
     DxfConversionError,
     convert_dxf_to_graph,
@@ -1115,26 +1115,29 @@ class MainWindow(QMainWindow):
         if not self.cad_graph or not self.cad_path:
             QMessageBox.warning(self, "변환 결과 필요", "DXF를 먼저 변환해 주세요.")
             return
-        default_path = self.cad_path.with_suffix(".pm.asy")
-        path, _ = QFileDialog.getSaveFileName(
+        parent = QFileDialog.getExistingDirectory(
             self,
-            "AutoMod 모델변환",
-            str(default_path),
-            "AutoMod System (*.asy)",
+            "model.arc를 생성할 상위 폴더 선택",
+            str(self.cad_path.parent),
         )
-        if not path:
+        if not parent:
             return
+        path = Path(parent) / "model.arc"
         try:
-            self.cad_automod_path = save_pm_asy(self.cad_graph, path)
+            generated = save_automod_model(self.cad_graph, path)
+            self.cad_automod_path = generated.archive
         except (AutoModConversionError, OSError) as error:
             QMessageBox.critical(self, "AutoMod 변환 실패", str(error))
             return
         statistics = self.cad_graph["metadata"]["statistics"]
         self.cad_graph_status.setText(
             f"{statistics['node_count']} Nodes  ·  {statistics['edge_count']} Edges  ·  "
-            f"{statistics['component_count']} Components\nAutoMod 변환 완료 · {self.cad_automod_path.name}"
+            f"{statistics['component_count']} Components\nAutoMod 변환 완료 · "
+            f"{self.cad_automod_path.name}/pm.asy"
         )
-        self.statusBar().showMessage(f"AutoMod pm.asy 변환 완료 · {self.cad_automod_path}", 8000)
+        self.statusBar().showMessage(
+            f"AutoMod model.arc 변환 완료 · {self.cad_automod_path}", 8000
+        )
 
     def create_future_contract(self, kind: str) -> None:
         names = {"A5": "bottleneck-preview", "A6": "roi-reduction-request", "A7": "policy-ab-request", "DT": "digital-twin-projection-request"}

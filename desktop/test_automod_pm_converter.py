@@ -1,4 +1,4 @@
-"""Tests for Graph JSON to AutoMod ``pm.asy`` conversion."""
+"""Tests for Graph JSON to a source-free AutoMod ``model.arc`` conversion."""
 
 from __future__ import annotations
 
@@ -8,7 +8,10 @@ from pathlib import Path
 
 from automod_pm_converter import (
     AutoModConversionError,
+    render_model_amo,
+    render_model_process_asy,
     render_pm_asy,
+    save_automod_model,
     save_pm_asy,
 )
 
@@ -63,6 +66,36 @@ class AutoModPmConverterTest(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertNotIn(b"\n", first.replace(b"\r\n", b""))
         first.decode("ascii")
+
+    def test_model_manifest_links_pm_and_empty_process_system(self) -> None:
+        manifest = render_model_amo(self.graph())
+        process_system = render_model_process_asy()
+        self.assertIn("MOVESYS name pm\r\n", manifest)
+        self.assertIn("PROCSYS name model~\r\n", manifest)
+        self.assertIn("SYSTYPE Process\r\n", process_system)
+        self.assertIn("PROCDEF UserId 1\r\n", process_system)
+        self.assertNotIn("PROC name", process_system)
+        self.assertNotIn("#include", process_system)
+
+    def test_creates_only_the_three_required_arc_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            generated = save_automod_model(self.graph(), Path(temporary) / "model.arc")
+            names = sorted(path.name for path in generated.archive.iterdir())
+            self.assertEqual(names, ["model.amo", "model~.asy", "pm.asy"])
+            self.assertEqual(generated.movement_system.name, "pm.asy")
+            self.assertFalse((Path(temporary) / "model.dir").exists())
+            for path in generated.archive.iterdir():
+                data = path.read_bytes()
+                self.assertNotIn(b"\n", data.replace(b"\r\n", b""))
+                data.decode("ascii")
+
+    def test_rejects_existing_arc_with_user_content(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            archive = Path(temporary) / "model.arc"
+            archive.mkdir()
+            (archive / "logic.m").write_text("begin model initialization function\n")
+            with self.assertRaisesRegex(AutoModConversionError, "변환기가 생성하지 않은"):
+                save_automod_model(self.graph(), archive)
 
     def test_rejects_unresolved_direction(self) -> None:
         graph = self.graph()

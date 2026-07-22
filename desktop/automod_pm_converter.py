@@ -1,9 +1,10 @@
-"""Directed Graph JSON to AutoMod AGVS ``pm.asy`` converter.
+"""Directed Graph JSON to a source-free AutoMod model archive.
 
-The generated file follows the AGVS system layout used by the two reference
-AutoMod models under ``development_src/AutoMod_Models``.  Graph edge direction
-becomes AutoMod guide-path direction, and every graph node is exposed as an
-AutoMod control point so model logic can refer to the imported topology.
+The generated ``model.arc`` layout follows the two reference AutoMod models
+under ``development_src/AutoMod_Models``.  ``model.amo`` registers the AGVS
+movement system in ``pm.asy`` and an empty Process system in ``model~.asy``.
+No ``model.dir`` or C/AutoMod source file is generated; AutoMod creates its
+working directory when the archive is opened and built.
 """
 
 from __future__ import annotations
@@ -40,6 +41,16 @@ class GuidePath:
     @property
     def length(self) -> float:
         return math.dist(self.start, self.end)
+
+
+@dataclass(frozen=True)
+class AutoModModelFiles:
+    """Paths belonging to one generated, source-free AutoMod archive."""
+
+    archive: Path
+    manifest: Path
+    process_system: Path
+    movement_system: Path
 
 
 def _number(value: float) -> str:
@@ -291,6 +302,63 @@ def render_pm_asy(graph: dict[str, Any]) -> str:
     return "\r\n".join(lines) + "\r\n"
 
 
+def render_model_process_asy() -> str:
+    """Render the empty Process system registered as ``model~``.
+
+    AutoMod still expects a Process system entry in the model manifest even
+    when no model logic has been written yet.  This file intentionally has no
+    process declarations, embedded logic, or references to ``.m`` sources.
+    """
+
+    lines = [
+        f"VERSION {AUTOMOD_VERSION}",
+        "SYSTYPE Process",
+        "UNITS Millimeters Seconds",
+        "SYSDEF UtilByAvail off RefCheck on debugger on warningMessages off report standard",
+        "FLAGS",
+        "\tSystem Inherit",
+        "\tText Inherit",
+        "\tResources Inherit",
+        "\tResource Names Invisible Inherit",
+        "\tQueues Inherit",
+        "\tQueue Names Invisible Inherit",
+        "\tQueue Amounts Invisible Inherit",
+        "\tBlocks Invisible Inherit",
+        "\tBlock Names Invisible Inherit",
+        "\tLabels Inherit",
+        "PROCDEF UserId 1",
+    ]
+    return "\r\n".join(lines) + "\r\n"
+
+
+def render_model_amo(graph: dict[str, Any]) -> str:
+    """Render ``model.amo`` and link ``pm`` with the empty ``model~`` system."""
+
+    paths, _ = _guide_paths(graph)
+    xs = [coordinate for path in paths for coordinate in (path.start[0], path.end[0])]
+    ys = [coordinate for path in paths for coordinate in (path.start[1], path.end[1])]
+    span = max(max(xs) - min(xs), max(ys) - min(ys))
+    margin = max(span * 0.05, 1000.0)
+    lines = [
+        f"VERSION {AUTOMOD_VERSION}",
+        "UNITS Millimeters Seconds",
+        "RNSET 1",
+        "DRAWPOS minx {minx} maxx {maxx} miny {miny} maxy {maxy} "
+        "minz 0 maxz 300 trx 0 try 0".format(
+            minx=_number(min(xs) - margin),
+            maxx=_number(max(xs) + margin),
+            miny=_number(min(ys) - margin),
+            maxy=_number(max(ys) + margin),
+        ),
+        "MOVESYS name pm",
+        "\tSYSPOS endx 1",
+        "PROCSYS name model~",
+        "\tSYSPOS endx 1",
+        "CONTROL snaplen 1 Hours counts 10 autorep reset",
+    ]
+    return "\r\n".join(lines) + "\r\n"
+
+
 def save_pm_asy(graph: dict[str, Any], filename: str | Path) -> Path:
     """Validate and save ``pm.asy`` using AutoMod's native CRLF convention."""
 
@@ -302,26 +370,77 @@ def save_pm_asy(graph: dict[str, Any], filename: str | Path) -> Path:
     return path.resolve()
 
 
+def save_automod_model(graph: dict[str, Any], archive: str | Path) -> AutoModModelFiles:
+    """Create a source-free ``model.arc`` directory and its three core files.
+
+    Existing generated archives can be refreshed, but a directory containing
+    any unrelated file is rejected so user-authored AutoMod content is never
+    overwritten or accidentally included in a source-free export.
+    """
+
+    archive_path = Path(archive).expanduser()
+    if archive_path.suffix.casefold() != ".arc":
+        archive_path = archive_path.with_suffix(".arc")
+    if archive_path.exists() and not archive_path.is_dir():
+        raise AutoModConversionError(f"AutoMod ARC 경로가 폴더가 아닙니다: {archive_path}")
+
+    generated_names = {"model.amo", "model~.asy", "pm.asy"}
+    if archive_path.is_dir():
+        unrelated = sorted(entry.name for entry in archive_path.iterdir() if entry.name not in generated_names)
+        if unrelated:
+            preview = ", ".join(unrelated[:8])
+            raise AutoModConversionError(
+                f"기존 ARC 폴더에 변환기가 생성하지 않은 항목이 있습니다: {preview}"
+            )
+
+    # Render first so validation failure cannot leave a partially generated
+    # archive on disk.
+    pm_content = render_pm_asy(graph)
+    process_content = render_model_process_asy()
+    manifest_content = render_model_amo(graph)
+
+    archive_path.mkdir(parents=True, exist_ok=True)
+    outputs = {
+        "model.amo": manifest_content,
+        "model~.asy": process_content,
+        "pm.asy": pm_content,
+    }
+    for name, content in outputs.items():
+        with (archive_path / name).open("w", encoding="ascii", newline="") as stream:
+            stream.write(content)
+
+    resolved = archive_path.resolve()
+    return AutoModModelFiles(
+        archive=resolved,
+        manifest=resolved / "model.amo",
+        process_system=resolved / "model~.asy",
+        movement_system=resolved / "pm.asy",
+    )
+
+
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="방향성 Graph JSON을 AutoMod pm.asy로 변환합니다.")
+    parser = argparse.ArgumentParser(description="방향성 Graph JSON을 AutoMod model.arc로 변환합니다.")
     parser.add_argument("input", type=Path, help="입력 Graph JSON")
-    parser.add_argument("-o", "--output", type=Path, help="출력 pm.asy 파일")
+    parser.add_argument("-o", "--output", type=Path, help="출력 model.arc 폴더")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    output = args.output or args.input.with_name("pm.asy")
+    output = args.output or args.input.with_name("model.arc")
     try:
         with args.input.open("r", encoding="utf-8-sig") as stream:
             graph = json.load(stream)
         if not isinstance(graph, dict):
             raise AutoModConversionError("Graph JSON 최상위 값은 object여야 합니다.")
-        saved = save_pm_asy(graph, output)
+        saved = save_automod_model(graph, output)
     except (AutoModConversionError, OSError, json.JSONDecodeError) as error:
         print(f"AutoMod 변환 실패: {error}")
         return 2
-    print(f"AutoMod 변환 완료: {saved}")
+    print(f"AutoMod 변환 완료: {saved.archive}")
+    print("  model.amo -> MOVESYS pm + PROCSYS model~")
+    print("  pm.asy")
+    print("  model~.asy (소스코드 없음)")
     return 0
 
 
