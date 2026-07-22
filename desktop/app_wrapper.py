@@ -6,5 +6,8 @@ from graph_ui_enhancer import install_enhancements
 
 install_enhancements(_app)
 
+MainWindow = _app.MainWindow
+main = _app.main
+
 if __name__ == "__main__":
-    raise SystemExit(_app.main())
+    raise SystemExit(main())
