@@ -5,6 +5,7 @@ on:
   pull_request:
     branches:
       - feature/5차-native-desktop-workbench
+      - main
     paths:
       - "desktop/**"
       - "apps/**"
@@ -17,6 +18,8 @@ on:
   push:
     branches:
       - feature/5차-native-desktop-workbench
+      - feature/Graph-생성-UI-개선
+      - main
     paths:
       - "desktop/**"
       - "apps/**"
