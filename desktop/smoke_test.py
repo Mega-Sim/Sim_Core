@@ -39,8 +39,14 @@ def main() -> int:
         if not window.cad_graph:
             raise RuntimeError("DXF graph was not created")
         statistics = window.cad_graph["metadata"]["statistics"]
-        if statistics["node_count"] != 12 or statistics["edge_count"] != 11:
+        if statistics["node_count"] != 3 or statistics["edge_count"] != 2:
             raise RuntimeError("DXF graph counts did not match the UI fixture")
+        geometry_types = [edge.get("geometry_type", "LINE") for edge in window.cad_graph["edges"]]
+        if geometry_types.count("LINE") != 1 or geometry_types.count("ARC") != 1:
+            raise RuntimeError("DXF graph did not preserve one LINE and one merged ARC")
+        arc_edge = next(edge for edge in window.cad_graph["edges"] if edge.get("geometry_type") == "ARC")
+        if arc_edge.get("source_edge_count") != 10 or len(arc_edge.get("geometry", [])) != 11:
+            raise RuntimeError("DXF ARC segments were not merged into one logical curve")
         if statistics["unresolved_direction_count"] != 0:
             raise RuntimeError("DXF graph contains unresolved directions")
         if not window.cad_graph_view.scene().items():
