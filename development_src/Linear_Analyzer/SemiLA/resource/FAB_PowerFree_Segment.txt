@@ -1,0 +1,23 @@
+
+CONVVEHSEG name DefSegment cap 1 pickup 10 Seconds setdown 10 Seconds
+	Stacking DEFAULT
+	figcurspeed 100
+	figmaxspeed 100
+	picpos endx 1 scx 1000 scy 1000 scz 1000
+ 
+	picunit Millimeters
+ 
+	fconn length 0.0 Millimeters noscale 0
+	rconn length 0.0 Millimeters noscale 0
+	PAPATTACH
+	PAP ind 0
+		trx 0 try 0 trz 0
+		
+CONVVEH type DefCarrier numveh nVehicleCount
+	vehsegs item DefSegment
+	start NAME_ALL
+	Stacking NOMINUSZ
+	picpos endx 1
+			load default
+				type VehSize
+			load empty

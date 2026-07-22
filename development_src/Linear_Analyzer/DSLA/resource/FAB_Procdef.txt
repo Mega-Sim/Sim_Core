@@ -1,0 +1,30 @@
+PROC	name	Pstart			0 traf Infinite nextproc die
+PROC	name	Pgenerate_Load	0 traf Infinite nextproc die
+PROC	name	Pselect_Next_Eq	0 traf Infinite nextproc die
+PROC	name	Pend			0 traf Infinite nextproc die
+PROC	name	Pmove			0 traf Infinite nextproc die
+PROC	name	Pwork			0 traf Infinite nextproc die
+PROC	name	Pstock			0 traf Infinite nextproc die
+PROC	name	Pmove_after_stk	0 traf Infinite nextproc die
+
+
+LDTYPE	name	Loadtype		10
+picpos endx 1
+ template Meters
+310 17
+2 2 0 1 1 none
+1 1 1 1 1 0 0
+end
+		create con 1 Days stream stream_Ltype_1 First Pstart 0 Limit 0
+		
+		
+LDTYPE name Lseed 0
+picpos endx 1
+ template Meters
+700 17
+2 2 0 1 1 none
+1
+310 0
+1 1 1 1 1 0 0
+end
+		create con 1 Seconds stream stream_Lseed_1 First Pstart 0 Limit 1

@@ -1,0 +1,15 @@
+VERSION 12.6.1.12
+SYSTYPE Process
+UNITS Millimeters Seconds
+SYSDEF UtilByAvail off RefCheck on debugger off warningMessages on report standard
+FLAGS
+ System Inherit
+ Text Red
+ Resources Inherit
+ Resource Names Red
+ Queues Inherit
+ Queue Names Red
+ Queue Amounts Red
+ Blocks Inherit
+ Block Names Invisible Red
+ Labels Red

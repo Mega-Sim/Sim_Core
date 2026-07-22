@@ -1,0 +1,14 @@
+SYSTYPE	Process
+UNITS		Millimeters Seconds
+SYSDEF UtilByAvail off RefCheck on debugger off warningMessages on report standard
+FLAGS
+	System			NoColor
+	Text			Red
+	Resources		NoColor
+	ResourceNames	Red
+	Queues			NoColor
+	QueueNames		Red
+	QueueAmounts	Red
+	Blocks			NoColor
+	BlockNames		Red
+	Labels			Red

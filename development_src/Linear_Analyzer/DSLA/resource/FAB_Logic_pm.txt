@@ -1,0 +1,187 @@
+PROCDEF
+PROC name pStart 0 traf Infinite nextproc die
+PROC name pFromTo 0 traf Infinite nextproc die
+PROC name pPreFromTo 0 traf Infinite nextproc die
+PROC name pMove 0 traf Infinite nextproc die
+PROC name pTimeDel 0 traf Infinite nextproc die
+LDTYPE name lStart 0
+picpos endx 1
+ template Millimeters
+700 17
+2 2 0 1 1 none
+1
+310 0
+1 1 1 1 1 0 0
+end
+		create con 1 Seconds stream stream_LoadType1_1 First pStart 0 Limit 1
+RSRC name rOHT 0 cap 2147483647 prtime con 5 Seconds stream stream_rOHT_1
+
+QUEUE name qOut 0 cap 2147483647
+
+COUNT name cWIP 0 cap Infinite
+ATT name larLotPerHour 0 type Real
+ATT name lapFromEq 0 type Location
+ATT name lapToEq 0 type Location
+VAR name vVehicleOrTime 0 type Integer
+VAR name vParkLocFoup 0 type Location
+VAR name vParkListFoup 0 type LocationList
+VAR name vfpRead 0 type FilePtr
+VAR name vi 0 type Integer
+VAR name vStrTmp 0 type String
+VAR name vFromEqsName 0 type String
+VAR name vToEqsName 0 type String
+VAR name vLotPerHour 0 type Real
+VAR name vFromToCnt 0 type Real
+VAR name vInitDel_Time 0 type Integer
+VAR name vOHTDel_Time 0 type Integer
+RNSTREAM stream0 0 type CMRG flags 1
+	cmrgseed 1 12345 12345 12345 12345 12345 12345
+RNSTREAM stream_LoadType1_1 0 type CMRG flags 1
+	title "Generated automatically for LoadType1"
+	cmrgseed 1 3692455944 1366884236 2968912127 335948734 4161675175 475798818
+RNSTREAM stream_rOHT_1 0 type CMRG flags 1
+	title "Generated automatically for rOHT"
+	cmrgseed 1 3692455944 1366884236 2968912127 335948734 4161675175 475798818
+RNSTATE 3692455944 1366884236 2968912127 335948734 4161675175 475798818
+SFileBegin	name vehicle.m
+begin pm park ok function
+	if vVehicleOrTime = 1 then
+	begin
+		if theVehicle type = "DefVehicle" then
+		begin
+			if theVehicle current distance parkLoc > 50000 mm then
+			begin
+				if parkLoc current > 1 then 
+					return false
+					
+				for each vParkLocFoup in vParkListFoup do
+				begin
+					if vParkLocFoup = parkLoc then return false
+				end
+				
+				insert parkLoc into vParkListFoup at end
+				
+				if vParkListFoup size > 200 then
+					remove first object from vParkListFoup
+				
+				set theVehicle color to blue
+				return true
+			end
+			
+			return false
+		end
+		
+		return false
+	end
+	return false
+end
+
+begin pm work ok function
+	set theVehicle color to red
+	return true
+end
+
+#@!
+SFileBegin	name init.m
+begin model initialization function
+
+	set vVehicleOrTime = 0 /* Time 반송 = 0, Vehicle 반송 = 1 */
+	set vInitDel_Time = 86400*15
+	set vOHTDel_Time = 150
+	return true
+
+end
+
+#@!
+SFileBegin	name logic.m
+begin pStart arriving
+    
+    clone 1 load to pTimeDel
+	/*변수 설정*/
+	open "arc/eqToeq.dat" for reading save result as vfpRead
+	
+	/*fromto 파일 읽어들이기*/
+	set vi to 1
+	while vfpRead eof = 0 do
+	begin
+		read vStrTmp from vfpRead with delimiter "\n"
+		read vFromEqsName, vToEqsName,	vLotPerHour from vStrTmp with delimiter "\t"
+			/*
+			vFromEqsName = From 설비군 명(Str)  
+			vToEqsName = To 설비군 명(Str)
+			vLotPerHour = 시간당 Lot 수(int)
+			*/
+		
+		if vFromEqsName index("-") <= vFromEqsName length then
+			set vFromEqsName substring(vFromEqsName index("-"), 1) = "_"
+			
+		if vToEqsName index("-") <= vToEqsName length then
+			set vToEqsName substring(vToEqsName index("-"), 1) = "_"
+			
+		if vFromEqsName substring(1,1) <> "*" then
+		begin		
+			print "pf:cp_"vFromEqsName to vStrTmp
+			set lapFromEq to vStrTmp
+			print "pf:cp_"vToEqsName to vStrTmp
+			set lapToEq to vStrTmp
+			set larLotPerHour to vLotPerHour
+			clone 1 load to pPreFromTo
+				
+/*			wait for 86400 * 3.0 / vFromToCnt sec	*/
+/*			wait for (1 + 86400 * 15.0 * u 0.5, 0.5) sec	*/
+			wait for 0.1 sec
+			inc vi by 1
+		end
+		else
+		begin
+			if vFromEqsName substring(1,6) = "* From" then
+			begin
+				set vFromToCnt to vLotPerHour
+			end
+		end
+		
+	end
+
+end
+
+begin pPreFromTo arriving
+	wait for (1 + 86400 * 15.0 * u 0.5, 0.5) sec
+	clone 1 load to pFromTo
+end
+
+begin pFromTo arriving
+	while 1 = 1 do
+	begin
+		clone 1 load to pMove
+		wait for n 60*60 / larLotPerHour, 60*60 / (larLotPerHour * 10) sec
+	end
+end
+
+
+
+begin pMove arriving
+	if lapFromEq <> null and lapToEq <> null then
+	begin
+		inc cWIP by 1
+		if vVehicleOrTime = 1 then
+		begin
+    		move into lapFromEq
+    		travel to lapToEq
+    	end
+    	else
+    	begin
+    		use rOHT for vOHTDel_Time sec
+    	end
+    	
+		dec cWIP by 1
+		move into qOut	
+	end
+	
+end
+
+begin pTimeDel arriving
+    wait for vInitDel_Time sec
+    set vVehicleOrTime = 1
+end
+
+#@!

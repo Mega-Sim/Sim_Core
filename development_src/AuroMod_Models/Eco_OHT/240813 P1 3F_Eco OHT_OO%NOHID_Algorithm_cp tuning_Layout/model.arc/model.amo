@@ -1,0 +1,9 @@
+VERSION 12.6.1.12
+UNITS Millimeters Seconds
+RNSET 7
+DRAWPOS minx -508046.24 maxx 14072.64 miny -22144.896 maxy 189076.16 minz 0 maxz 300 trx 0 try 0
+MOVESYS name pm
+	SYSPOS endx 1
+PROCSYS name model~
+	SYSPOS endx 1
+CONTROL snaplen 1 Hours counts 20 autorep reset
