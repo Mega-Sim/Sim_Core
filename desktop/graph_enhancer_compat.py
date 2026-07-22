@@ -13,7 +13,13 @@ class CompatibleGraphSelectionController(enhancer.GraphSelectionController):
     """Let Shift+Left events reach NetworkView while preserving edge selection."""
 
     def eventFilter(self, watched: Any, event: Any) -> bool:  # noqa: N802
-        if watched is self.view.viewport():
+        try:
+            viewport = self.view.viewport()
+        except RuntimeError:
+            # Qt can dispatch one last filter event while Python modules are
+            # shutting down after the C++ view has already been destroyed.
+            return False
+        if watched is viewport:
             event_type = event.type()
             mouse_types = {
                 QEvent.Type.MouseButtonPress,
