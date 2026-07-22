@@ -7,6 +7,7 @@ from graph_ui_patch import (
     install_dark_graph_renderer,
     install_graph_interaction,
 )
+from pan_fix import install_bidirectional_pan
 
 
 _original_convert_dxf_to_graph = base.convert_dxf_to_graph
@@ -17,10 +18,11 @@ def _convert_dxf_to_graph_with_curve_merge(*args, **kwargs):  # type: ignore[no-
     return consolidate_curve_edges(graph)
 
 
-# Apply all graph behaviors to the shared NetworkView class.  Any normal preview
+# Apply all graph behaviors to the shared NetworkView class. Any normal preview
 # or enlarged graph view created from this class inherits the same interaction.
 install_graph_interaction(base.NetworkView)
 install_dark_graph_renderer(base.NetworkView)
+install_bidirectional_pan(base.NetworkView)
 base.convert_dxf_to_graph = _convert_dxf_to_graph_with_curve_merge
 
 MainWindow = base.MainWindow
