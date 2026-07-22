@@ -21,6 +21,10 @@ $Python = if (Get-Command python -ErrorAction SilentlyContinue) {
 if ($LASTEXITCODE -ne 0) {
     throw "DXF graph converter tests failed."
 }
+& $Python desktop\test_automod_pm_converter.py
+if ($LASTEXITCODE -ne 0) {
+    throw "AutoMod pm.asy converter tests failed."
+}
 
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release --parallel

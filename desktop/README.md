@@ -55,6 +55,7 @@ dist\Sim_Core_Flow_Workbench.exe
 | `sim-core analyze` | 실제 Core 연결 |
 | `sim-core run` | 실제 Core 연결 |
 | DXF → 방향성 Graph JSON | 실제 변환·화면 미리보기·저장 연결 |
+| 방향성 Graph → AutoMod `pm.asy` | 실제 변환·Control Point 생성·저장 연결 |
 | Graph 전용 확대 팝업 | 네이티브 구현 |
 | Edge 클릭·드래그 블록 선택 | 네이티브 구현 |
 | 선택 Edge 방향 반전 | Graph JSON에 반영 |
@@ -74,6 +75,7 @@ Windows 패키징 과정에서는 `desktop/smoke_test.py`와 `desktop/graph_ui_s
 6. `선택 방향 반전`을 누르면 선택된 방향성 Edge의 `dir` 값이 반대로 변경됩니다.
 7. 넓게 보고 싶으면 `그래프만 크게 보기`를 눌러 Graph 전용 팝업을 엽니다. 팝업에서도 선택과 방향 반전이 가능합니다.
 8. `Graph JSON 저장`으로 `<원본명>.graph.json`을 저장하면 수동 방향 수정 내용까지 저장됩니다.
+9. 바로 옆의 `AutoMod 모델변환`을 누르면 현재 방향과 곡선 형상을 반영한 `pm.asy`를 저장합니다.
 
 Rail Layer를 비워 두면 모든 LINE·ARC Layer를 읽습니다. 여러 Layer는 쉼표 또는 세미콜론으로 구분합니다. 기존 파일 카드의 장식용 Badge/Icon 영역은 Graph 화면 공간 확보를 위해 축소되며, Graph 캔버스의 최소 높이를 확장합니다.
 
@@ -94,4 +96,15 @@ py desktop\dxf_graph_converter.py layout.dxf `
 
 ```powershell
 py desktop\test_dxf_graph_converter.py
+py desktop\test_automod_pm_converter.py
 ```
+
+이미 저장된 Graph JSON은 UI 없이도 변환할 수 있습니다.
+
+```powershell
+py desktop\automod_pm_converter.py layout.graph.json --output pm.asy
+```
+
+출력은 AutoMod 12.6 AGVS System 형식이며 좌표는 `Millimeters`, 각 Graph Node는
+`cp_node_<번호>` Control Point로 생성됩니다. 차량 수는 0으로 두므로 AutoMod에서
+모델을 연 뒤 차량 종류·수량과 운행 로직을 해당 프로젝트에 맞게 설정할 수 있습니다.

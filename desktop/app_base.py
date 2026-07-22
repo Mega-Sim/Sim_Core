@@ -47,6 +47,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from automod_pm_converter import AutoModConversionError, save_pm_asy
 from dxf_graph_converter import (
     DxfConversionError,
     convert_dxf_to_graph,
@@ -54,8 +55,8 @@ from dxf_graph_converter import (
 )
 
 
-APP_VERSION = "0.3.0"
-BRANCH_NAME = "agent/Make-Graph-file-from-CAD-Layout-file"
+APP_VERSION = "0.4.0"
+BRANCH_NAME = "feature/AutoMod-모델링-기능-개발"
 
 
 def runtime_root() -> Path:
@@ -534,6 +535,7 @@ class MainWindow(QMainWindow):
         self.demand_path: Optional[Path] = None
         self.cad_path: Optional[Path] = None
         self.cad_graph_path: Optional[Path] = None
+        self.cad_automod_path: Optional[Path] = None
         self.facility: Optional[Dict[str, Any]] = None
         self.scenario: Optional[Dict[str, Any]] = None
         self.analysis: Optional[Dict[str, Any]] = None
@@ -726,8 +728,12 @@ class MainWindow(QMainWindow):
         self.cad_save_button = button("Graph JSON 저장", "primary")
         self.cad_save_button.setEnabled(False)
         self.cad_save_button.clicked.connect(self.save_cad_graph)
-        form.addWidget(convert, 3, 2)
-        form.addWidget(self.cad_save_button, 3, 3)
+        self.cad_automod_button = button("AutoMod 모델변환", "primary")
+        self.cad_automod_button.setEnabled(False)
+        self.cad_automod_button.clicked.connect(self.save_automod_model)
+        form.addWidget(convert, 3, 1)
+        form.addWidget(self.cad_save_button, 3, 2)
+        form.addWidget(self.cad_automod_button, 3, 3)
         layout.addWidget(contract)
 
         preview = panel()
@@ -1049,8 +1055,10 @@ class MainWindow(QMainWindow):
         except (DxfConversionError, OSError) as error:
             self.cad_graph = None
             self.cad_graph_path = None
+            self.cad_automod_path = None
             self.cad_graph_view.set_graph(None)
             self.cad_save_button.setEnabled(False)
+            self.cad_automod_button.setEnabled(False)
             self.cad_graph_status.setText(f"변환 실패\n{error}")
             QMessageBox.critical(self, "DXF 변환 실패", str(error))
             return
@@ -1059,8 +1067,10 @@ class MainWindow(QMainWindow):
 
         self.cad_graph = graph
         self.cad_graph_path = None
+        self.cad_automod_path = None
         self.cad_graph_view.set_graph(graph)
         self.cad_save_button.setEnabled(True)
+        self.cad_automod_button.setEnabled(True)
         metadata = graph["metadata"]
         statistics = metadata["statistics"]
         layers_text = ", ".join(metadata["selected_layers"])
@@ -1100,6 +1110,31 @@ class MainWindow(QMainWindow):
             f"{statistics['component_count']} Components\n저장 완료 · {self.cad_graph_path.name}"
         )
         self.statusBar().showMessage(f"Graph JSON 저장 완료 · {self.cad_graph_path}", 8000)
+
+    def save_automod_model(self) -> None:
+        if not self.cad_graph or not self.cad_path:
+            QMessageBox.warning(self, "변환 결과 필요", "DXF를 먼저 변환해 주세요.")
+            return
+        default_path = self.cad_path.with_suffix(".pm.asy")
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "AutoMod 모델변환",
+            str(default_path),
+            "AutoMod System (*.asy)",
+        )
+        if not path:
+            return
+        try:
+            self.cad_automod_path = save_pm_asy(self.cad_graph, path)
+        except (AutoModConversionError, OSError) as error:
+            QMessageBox.critical(self, "AutoMod 변환 실패", str(error))
+            return
+        statistics = self.cad_graph["metadata"]["statistics"]
+        self.cad_graph_status.setText(
+            f"{statistics['node_count']} Nodes  ·  {statistics['edge_count']} Edges  ·  "
+            f"{statistics['component_count']} Components\nAutoMod 변환 완료 · {self.cad_automod_path.name}"
+        )
+        self.statusBar().showMessage(f"AutoMod pm.asy 변환 완료 · {self.cad_automod_path}", 8000)
 
     def create_future_contract(self, kind: str) -> None:
         names = {"A5": "bottleneck-preview", "A6": "roi-reduction-request", "A7": "policy-ab-request", "DT": "digital-twin-projection-request"}
