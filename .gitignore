@@ -8,3 +8,5 @@ __pycache__/
 *.py[cod]
 compile_commands.json
 build/
+
+**/p2l7fw.dir/pm.sys
