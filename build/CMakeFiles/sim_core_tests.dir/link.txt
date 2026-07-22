@@ -1,1 +1,0 @@
-/usr/bin/c++ CMakeFiles/sim_core_tests.dir/tests/sim_core_tests.cpp.o -o sim_core_tests  libsim_core.a
