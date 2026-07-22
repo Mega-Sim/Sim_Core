@@ -51,3 +51,5 @@ jobs:
           path: package/
           if-no-files-found: error
           retention-days: 30
+
+# Rebuild marker: latest graph interaction and curve-edge changes
