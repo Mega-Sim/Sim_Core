@@ -7,9 +7,9 @@ DXF conversion algorithm.
 from __future__ import annotations
 
 import re
-from typing import Any, Iterable
+from typing import Any
 
-from PySide6.QtCore import QEvent, QPoint, QRect, Qt
+from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt
 from PySide6.QtGui import QColor, QPen
 from PySide6.QtWidgets import (
     QDialog,
@@ -39,10 +39,11 @@ def _edge_id_from_item(item: Any) -> int | None:
     return int(match.group(1)) if match else None
 
 
-class GraphSelectionController:
+class GraphSelectionController(QObject):
     """Adds click and rubber-band selection to an existing NetworkView."""
 
     def __init__(self, owner: Any, view: Any, *, popup: bool = False) -> None:
+        super().__init__(view)
         self.owner = owner
         self.view = view
         self.popup = popup
@@ -55,18 +56,22 @@ class GraphSelectionController:
 
     def eventFilter(self, watched: Any, event: Any) -> bool:  # noqa: N802
         if watched is not self.view.viewport():
-            return False
-        if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+            return super().eventFilter(watched, event)
+        if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
             self.origin = event.position().toPoint()
             self.dragging = True
             self.rubber_band.setGeometry(QRect(self.origin, self.origin))
             self.rubber_band.show()
             return True
-        if event.type() == QEvent.MouseMove and self.dragging:
+        if event.type() == QEvent.Type.MouseMove and self.dragging:
             current = event.position().toPoint()
             self.rubber_band.setGeometry(QRect(self.origin, current).normalized())
             return True
-        if event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton and self.dragging:
+        if (
+            event.type() == QEvent.Type.MouseButtonRelease
+            and event.button() == Qt.MouseButton.LeftButton
+            and self.dragging
+        ):
             self.dragging = False
             rect = self.rubber_band.geometry().normalized()
             self.rubber_band.hide()
@@ -75,7 +80,7 @@ class GraphSelectionController:
             else:
                 self._select_rect(rect)
             return True
-        return False
+        return super().eventFilter(watched, event)
 
     def _select_single(self, pos: QPoint) -> None:
         item = self.view.itemAt(pos)
@@ -100,12 +105,24 @@ class GraphSelectionController:
                 continue
             pen = item.pen()
             if edge_id in self.selected_edges:
-                item.setPen(QPen(QColor("#ffd54f"), max(4.5, pen.widthF() + 1.5), pen.style(), pen.capStyle(), pen.joinStyle()))
+                item.setPen(
+                    QPen(
+                        QColor("#ffd54f"),
+                        max(4.5, pen.widthF() + 1.5),
+                        pen.style(),
+                        pen.capStyle(),
+                        pen.joinStyle(),
+                    )
+                )
 
     def reverse_selected(self) -> None:
         graph = getattr(self.owner, "cad_graph", None)
         if not graph or not self.selected_edges:
-            QMessageBox.information(self.view, "방향 반전", "먼저 Edge를 클릭하거나 마우스로 영역을 드래그해 선택해 주세요.")
+            QMessageBox.information(
+                self.view,
+                "방향 반전",
+                "먼저 Edge를 클릭하거나 마우스로 영역을 드래그해 선택해 주세요.",
+            )
             return
         changed = 0
         edges = graph.get("edges", [])
@@ -117,12 +134,19 @@ class GraphSelectionController:
                 edges[edge_id]["dir"] = [direction[1], direction[0]]
                 changed += 1
         if not changed:
-            QMessageBox.information(self.view, "방향 반전", "선택 영역에 반전 가능한 방향성 Edge가 없습니다.")
+            QMessageBox.information(
+                self.view,
+                "방향 반전",
+                "선택 영역에 반전 가능한 방향성 Edge가 없습니다.",
+            )
             return
         self.refresh_views()
         status = getattr(self.owner, "cad_graph_status", None)
         if status is not None:
-            status.setText(f"선택한 Edge {changed}개의 방향을 반전했습니다. Graph JSON 저장 시 변경 내용이 반영됩니다.")
+            status.setText(
+                f"선택한 Edge {changed}개의 방향을 반전했습니다. "
+                "Graph JSON 저장 시 변경 내용이 반영됩니다."
+            )
 
     def refresh_views(self) -> None:
         graph = getattr(self.owner, "cad_graph", None)
@@ -151,10 +175,9 @@ def _remove_wasted_file_card_space(window: Any) -> None:
         layout.setSpacing(5)
         for index in reversed(range(layout.count())):
             item = layout.itemAt(index)
-            spacer = item.spacerItem()
-            if spacer is not None:
+            if item.spacerItem() is not None:
                 layout.removeItem(item)
-        card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
 
 
 def _add_graph_toolbar(window: Any, module: Any) -> None:
@@ -200,7 +223,9 @@ def _open_graph_popup(window: Any, module: Any) -> None:
     layout.setSpacing(8)
 
     top = QHBoxLayout()
-    guide = QLabel("마우스 드래그로 Edge 블록 선택 · 클릭으로 단일 Edge 선택 · 선택 후 방향 반전")
+    guide = QLabel(
+        "마우스 드래그로 Edge 블록 선택 · 클릭으로 단일 Edge 선택 · 선택 후 방향 반전"
+    )
     guide.setObjectName("Muted")
     reverse = _button("⇄  선택 방향 반전")
     close = _button("닫기")
