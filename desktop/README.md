@@ -114,3 +114,9 @@ py desktop\automod_pm_converter.py layout.graph.json --output model.arc
 `pm.asy`는 AutoMod 12.6 AGVS System 형식이며 좌표는 `Millimeters`, 각 Graph
 Node는 `cp_node_<번호>` Control Point로 생성됩니다. 차량 수는 0으로 두므로
 AutoMod에서 모델을 연 뒤 차량 종류·수량과 운행 로직을 추가할 수 있습니다.
+Graph에서 하나로 통합된 DXF ARC Edge는 AutoMod에서도 중심점과 회전각을 가진
+반지름 450 mm의 단일 원호 `GPATH`로 생성됩니다. 450 mm 원호와 일치하지 않는
+곡선은 여러 직선으로 대체하지 않고 변환 오류로 차단합니다. Control Point 크기는
+기본값의 1/5로 출력합니다. AutoMod 방향 표식은 ASY 크기 속성이 없으므로 원호당
+여러 표식이 겹치지 않도록 논리 ARC 하나당 단일 `GPATH`만 생성합니다. `nav` 값은
+표식 크기가 아닌 차량의 경로 탐색 비용이므로 기본값 1을 유지합니다.

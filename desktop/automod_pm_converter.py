@@ -18,6 +18,9 @@ from typing import Any, Sequence
 
 
 AUTOMOD_VERSION = "12.6.1.12"
+ARC_RADIUS_MILLIMETERS = 450.0
+ARC_RADIUS_TOLERANCE_MILLIMETERS = 2.0
+CONTROL_POINT_SCALE = 0.2
 UNIT_TO_MILLIMETERS = {
     "millimeter": 1.0,
     "meter": 1000.0,
@@ -37,10 +40,18 @@ class GuidePath:
     end: tuple[float, float]
     source_node: int | None
     target_node: int | None
+    center: tuple[float, float] | None = None
+    sweep_radians: float | None = None
 
     @property
     def length(self) -> float:
+        if self.center is not None and self.sweep_radians is not None:
+            return math.dist(self.start, self.center) * abs(self.sweep_radians)
         return math.dist(self.start, self.end)
+
+    @property
+    def is_arc(self) -> bool:
+        return self.center is not None and self.sweep_radians is not None
 
 
 @dataclass(frozen=True)
@@ -132,6 +143,71 @@ def _edge_points(
     return points, source, target
 
 
+def _fixed_radius_arc(
+    points: Sequence[tuple[float, float]],
+    *,
+    edge_index: int,
+) -> tuple[tuple[float, float], float]:
+    """Build one exact 450 mm AutoMod arc matching the sampled Graph edge."""
+
+    if len(points) < 3:
+        raise AutoModConversionError(
+            f"Edge {edge_index} ARC에는 중심을 계산할 점이 3개 이상 필요합니다."
+        )
+
+    start, end = points[0], points[-1]
+    chord_x, chord_y = end[0] - start[0], end[1] - start[1]
+    chord_length = math.hypot(chord_x, chord_y)
+    if chord_length <= 1e-9:
+        raise AutoModConversionError(f"Edge {edge_index} ARC의 시작점과 끝점이 같습니다.")
+
+    radius = ARC_RADIUS_MILLIMETERS
+    if chord_length > 2.0 * radius + ARC_RADIUS_TOLERANCE_MILLIMETERS:
+        raise AutoModConversionError(
+            f"Edge {edge_index} ARC의 양 끝점 거리가 {chord_length:.3f} mm여서 "
+            f"반지름 {radius:g} mm 원호를 만들 수 없습니다."
+        )
+
+    half_chord = min(chord_length * 0.5, radius)
+    center_offset = math.sqrt(max(0.0, radius * radius - half_chord * half_chord))
+    midpoint = ((start[0] + end[0]) * 0.5, (start[1] + end[1]) * 0.5)
+    normal = (-chord_y / chord_length, chord_x / chord_length)
+    candidates = [
+        (
+            midpoint[0] + sign * normal[0] * center_offset,
+            midpoint[1] + sign * normal[1] * center_offset,
+        )
+        for sign in (-1.0, 1.0)
+    ]
+    center = min(
+        candidates,
+        key=lambda candidate: sum(
+            abs(math.dist(point, candidate) - radius) for point in points
+        ),
+    )
+    maximum_error = max(abs(math.dist(point, center) - radius) for point in points)
+    if maximum_error > ARC_RADIUS_TOLERANCE_MILLIMETERS:
+        raise AutoModConversionError(
+            f"Edge {edge_index} ARC가 반지름 {radius:g} mm 원호와 일치하지 않습니다 "
+            f"(최대 오차 {maximum_error:.3f} mm)."
+        )
+
+    angles = [math.atan2(point[1] - center[1], point[0] - center[0]) for point in points]
+    deltas: list[float] = []
+    for previous, current in zip(angles, angles[1:]):
+        delta = (current - previous + math.pi) % (2.0 * math.pi) - math.pi
+        if abs(delta) > 1e-10:
+            deltas.append(delta)
+    if not deltas or any(delta * deltas[0] < 0 for delta in deltas[1:]):
+        raise AutoModConversionError(
+            f"Edge {edge_index} ARC geometry의 진행 방향이 연속적이지 않습니다."
+        )
+    sweep = sum(deltas)
+    if abs(sweep) <= 1e-9 or abs(sweep) > 2.0 * math.pi + 1e-6:
+        raise AutoModConversionError(f"Edge {edge_index} ARC의 회전각이 올바르지 않습니다.")
+    return center, sweep
+
+
 def _guide_paths(
     graph: dict[str, Any],
 ) -> tuple[list[GuidePath], dict[int, tuple[str, float]]]:
@@ -152,33 +228,24 @@ def _guide_paths(
             raise AutoModConversionError(f"Edge {edge_index} 형식이 올바르지 않습니다.")
         points, source, target = _edge_points(edge, nodes, edge_index=edge_index)
         points = [_scaled(point, scale) for point in points]
-        edge_paths: list[GuidePath] = []
-        for first, second in zip(points, points[1:]):
-            if math.dist(first, second) <= 1e-9:
-                continue
-            path = GuidePath(
-                name=f"path{len(paths) + 1}",
-                start=first,
-                end=second,
-                source_node=source if not edge_paths else None,
-                target_node=None,
-            )
-            paths.append(path)
-            edge_paths.append(path)
-        if not edge_paths:
+        if math.dist(points[0], points[-1]) <= 1e-9:
             raise AutoModConversionError(f"Edge {edge_index}의 길이가 0입니다.")
-
-        last = edge_paths[-1]
-        edge_paths[-1] = GuidePath(
-            name=last.name,
-            start=last.start,
-            end=last.end,
-            source_node=last.source_node,
+        center: tuple[float, float] | None = None
+        sweep: float | None = None
+        if str(edge.get("geometry_type", "")).casefold() == "arc":
+            center, sweep = _fixed_radius_arc(points, edge_index=edge_index)
+        path = GuidePath(
+            name=f"path{len(paths) + 1}",
+            start=points[0],
+            end=points[-1],
+            source_node=source,
             target_node=target,
+            center=center,
+            sweep_radians=sweep,
         )
-        paths[-1] = edge_paths[-1]
-        node_anchors.setdefault(source, (edge_paths[0].name, 0.0))
-        node_anchors.setdefault(target, (edge_paths[-1].name, edge_paths[-1].length))
+        paths.append(path)
+        node_anchors.setdefault(source, (path.name, 0.0))
+        node_anchors.setdefault(target, (path.name, path.length))
 
     isolated_nodes = sorted(set(range(len(nodes))) - set(node_anchors))
     if isolated_nodes:
@@ -223,22 +290,41 @@ def render_pm_asy(graph: dict[str, Any]) -> str:
         "\tsprvel 0 Infinite Meters Seconds",
         "\tcrvvel 0 Infinite Meters Seconds",
         "AGVSTOL minang 150 maxang 1800",
-        "GPATHTYPE name DefaultGuidePath one normal attach rigid color 0 nav 1 vel 1 0 Meters Seconds",
+        # ``nav`` is AutoMod's route-cost factor, not a direction-marker scale.
+        # Keep it at the native default so exporting never changes AGV routing.
+        "GPATHTYPE name DefaultGuidePath one normal attach rigid color 0 nav 1 "
+        "vel 1 0 Meters Seconds",
     ]
-    lines.extend(
-        "GPATH name {name} type DefaultGuidePath piece begx {begx} begy {begy} "
-        "endx {endx} endy {endy} upz 1".format(
-            name=path.name,
-            begx=_number(path.start[0]),
-            begy=_number(path.start[1]),
-            endx=_number(path.end[0]),
-            endy=_number(path.end[1]),
-        )
-        for path in paths
-    )
+    for path in paths:
+        if path.is_arc:
+            assert path.center is not None
+            assert path.sweep_radians is not None
+            lines.append(
+                "GPATH name {name} type DefaultGuidePath piece cenx {cenx} ceny {ceny} "
+                "begx {begx} begy {begy} upz 1 angle {angle}".format(
+                    name=path.name,
+                    cenx=_number(path.center[0]),
+                    ceny=_number(path.center[1]),
+                    begx=_number(path.start[0]),
+                    begy=_number(path.start[1]),
+                    angle=_number(math.degrees(path.sweep_radians) * 10.0),
+                )
+            )
+        else:
+            lines.append(
+                "GPATH name {name} type DefaultGuidePath piece begx {begx} begy {begy} "
+                "endx {endx} endy {endy} upz 1".format(
+                    name=path.name,
+                    begx=_number(path.start[0]),
+                    begy=_number(path.start[1]),
+                    endx=_number(path.end[0]),
+                    endy=_number(path.end[1]),
+                )
+            )
     lines.append(
         "CPOINTTYPE name DefaultControlPoint cap 2147483647 release distance 0 Feet "
-        "align leadingpap limit Infinite scale 1 color -1 nrot 0 nscale 1"
+        f"align leadingpap limit Infinite scale {_number(CONTROL_POINT_SCALE)} "
+        f"color -1 nrot 0 nscale {_number(CONTROL_POINT_SCALE)}"
     )
     for node_index in range(len(node_anchors)):
         path_name, distance = node_anchors[node_index]
