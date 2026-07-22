@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mega-sim.github.io/sim-core/schemas/scenario/1.0.0",
+  "title": "Sim_Core Vertical Slice Scenario",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "scenario_id",
+    "model_revision_id",
+    "duration_us",
+    "vehicles",
+    "jobs"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "scenario_id": { "$ref": "#/$defs/id" },
+    "model_revision_id": { "$ref": "#/$defs/id" },
+    "duration_us": { "type": "integer", "minimum": 1 },
+    "zero_delay_event_limit": { "type": "integer", "minimum": 1 },
+    "master_seed": { "type": "integer", "minimum": 0 },
+    "vehicles": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/vehicle" }
+    },
+    "jobs": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/job" }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "vehicle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "initial_station_id"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "initial_station_id": { "$ref": "#/$defs/id" }
+      }
+    },
+    "job": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "pickup_station_id",
+        "dropoff_station_id",
+        "release_time_us",
+        "load_duration_us",
+        "unload_duration_us"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "pickup_station_id": { "$ref": "#/$defs/id" },
+        "dropoff_station_id": { "$ref": "#/$defs/id" },
+        "release_time_us": { "type": "integer", "minimum": 0 },
+        "load_duration_us": { "type": "integer", "minimum": 0 },
+        "unload_duration_us": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

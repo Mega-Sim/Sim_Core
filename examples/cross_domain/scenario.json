@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.1.0",
+  "scenario_id": "cross-domain-demand",
+  "model_revision_id": "cross-domain-loop-v1",
+  "duration_us": 60000000,
+  "zero_delay_event_limit": 1000,
+  "master_seed": 20260720,
+  "vehicles": [
+    {
+      "id": "OHT-001",
+      "initial_station_id": "ST-A"
+    }
+  ],
+  "jobs": [
+    {
+      "id": "JOB-001",
+      "pickup_station_id": "ST-B",
+      "dropoff_station_id": "ST-C",
+      "release_time_us": 0,
+      "load_duration_us": 2000000,
+      "unload_duration_us": 3000000
+    }
+  ],
+  "from_to_demands": [
+    {
+      "id": "OD-A-C",
+      "from_station_id": "ST-A",
+      "to_station_id": "ST-C",
+      "expected_moves_per_hour": 40
+    }
+  ]
+}

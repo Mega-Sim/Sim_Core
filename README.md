@@ -111,6 +111,173 @@ Omniverse / Isaac Sim / Cloud GPU
 - [ADR-0003: Canonical Facility Model 경계](docs/architecture/decisions/0003-canonical-facility-model-boundary.md)
 - [ADR-0004: C++20 헤드리스 코어](docs/architecture/decisions/0004-cpp20-headless-core.md)
 
+## 최초 개발 Vertical Slice
+
+설계가 코드 구조만 만든 채 오래 분리되지 않도록, 첫 개발 단위에서 다음 최소 실행 경로를 구현했습니다.
+
+- CMake/C++20 정적 라이브러리와 Headless CLI
+- versioned Canonical Facility/Scenario JSON Schema
+- Node, 방향성 Edge, Station, Source Identity, 좌표·geometry 계약
+- 구조·단위·geometry·graph·scenario 사전 검증
+- `int64` microsecond와 `(time, priority, sequence)` 결정론적 Event Queue
+- generation/tombstone 취소와 timestamp별 zero-delay guard
+- 자유주행시간 기반 방향성 Dijkstra와 nearest-feasible dispatch
+- F0 차량/Job 상태 전이
+- 결정론적 JSONL Event Trace, Run Manifest, 최소 Trace Replay
+- 단일 직선 network Golden Scenario
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+
+./build/sim-core validate \
+  --facility examples/single_line/facility.json \
+  --scenario examples/single_line/scenario.json
+
+./build/sim-core run \
+  --facility examples/single_line/facility.json \
+  --scenario examples/single_line/scenario.json \
+  --output run-output
+
+./build/sim-core replay --trace run-output/event_trace.jsonl
+```
+
+Golden Scenario는 차량 1대와 Job 1건이 `IDLE → TO_PICKUP → LOADING → TO_DROPOFF → UNLOADING → IDLE`로 20초에 완료되며, 반복 실행 시 동일한 `trace_hash`를 생성합니다.
+
+- [최초 Vertical Slice 개발 기준과 검증 결과](docs/development/VERTICAL_SLICE_01.md)
+
+## 2차 개발: Cross-Domain Validation Vertical Slice
+
+2차 개발은 Architecture v5의 `A2 Cross-Domain Validation` 품질 게이트를 실행 가능한 코드로 연결합니다.
+
+- Facility/Scenario Schema `1.1.0`과 `1.0.0` 하위 호환 Loader
+- ControlPoint, Zone, Parking, Charger, VehicleType, source geometry transform
+- 정규 JSON 기반 실제 SHA-256 `content_hash` 검증
+- JSON 또는 중립 From-To CSV 수요 입력
+- Canonical ID와 source identity 충돌 검출
+- source artifact/namespace provenance 누락 검출
+- source frame과 canonical frame 사이 transform 누락·중복·target 불일치 검출
+- station pose와 rail attachment node 좌표 교차검증
+- From-To station 존재성·방향성 도달성·경로·거리·예상 이동시간 분석
+- From-To pressure와 station capacity 사전 비교
+- revision 간 hash 재사용, source identity remap, node 이동 진단
+- versioned JSON 진단 리포트와 비정상 종료 코드
+
+```bash
+./build/sim-core analyze \
+  --facility examples/cross_domain/facility.json \
+  --scenario examples/cross_domain/scenario.json \
+  --from-to-csv examples/cross_domain/from_to.csv \
+  --output cross-domain-report.json
+```
+
+정상 예제는 `OD-A-C` 수요에 대해 `E-A-B → E-B-C`, 거리 `30,000,000 um`, 자유주행시간 `15,000,000 us`를 결정론적으로 산출합니다.
+
+- [2차 Cross-Domain Validation 개발 기준과 검증 결과](docs/development/VERTICAL_SLICE_02.md)
+
+## 3차 개발: Flow Intelligence Vertical Slice
+
+### 무엇을, 왜 했는가
+
+3차 개발은 Architecture v5의 `A3 Flow Intelligence`를 실행 가능한 코드로 연결합니다. 2차 개발 문서(`VERTICAL_SLICE_02.md`)가 명시한 다음 단계 — *"2차에서 생성한 `demand_routes`를 입력으로 edge frequency·route concentration·merge pressure·capacity margin을 계산한다"* — 를 그대로 구현한 것입니다.
+
+목적은 **전체 동적 시뮬레이션을 돌리기 전에, 어디에 부하가 몰리는지를 저비용 정적 분석으로 먼저 찾는 것**입니다. 정적 분석은 시뮬레이션을 대체하지 않고, "어디를 자세히 봐야 하는가"(ROI)와 병목 후보를 좁히는 앞단 지능 계층입니다.
+
+```text
+Cross-Domain Validator (2차)
+        |
+        v
+  demand_routes  (도달 가능한 From-To별 최단 edge 경로)
+        |
+        v
+  Flow Intelligence (3차)  ──►  Edge Flow · Node Flow · Station Flow
+        |
+        v
+  이후 Bottleneck Intelligence(A5) · ROI Reduction(A6)의 공통 입력
+```
+
+### 구체적으로 추가된 것
+
+`CrossDomainReport`에 세 가지 관측값(observation)을 추가했습니다. 모두 진단(diagnostic)이 아니라 구조화된 분석 데이터이며, PASS/FAIL 게이트를 바꾸지 않습니다.
+
+| 관측값 | 대표 필드 | 무엇을 계산하나 |
+|---|---|---|
+| `EdgeFlowObservation` | `expected_moves_per_hour`, `flow_share`, `demand_count`, `contributing_demand_ids` | edge별 시간당 통과량과 전체 대비 집중도, 기여 수요 목록 |
+| `NodeFlowObservation` | `inflow_moves_per_hour`, `incoming_edge_count`, `merge_pressure` | node 유입/유출과 합류 지점 압력 |
+| `StationFlowObservation` | `peak_moves_per_hour`, `capacity_margin_per_hour`, `utilization_ratio`, `over_capacity` | station 부하와 capacity 여유·사용률·초과 여부 |
+
+집계 규칙:
+
+- **edge frequency**: 각 `demand_route`의 edge마다 그 경로를 지나는 수요의 `expected_moves_per_hour`를 합산합니다. flow가 없는 edge는 관측값에 나타나지 않습니다.
+- **route concentration**: `flow_share = 이 edge 이동량 / 전체 edge 이동량 합`. corridor에 부하가 몰릴수록 커집니다.
+- **merge pressure**: flow를 싣고 한 node로 들어오는 서로 다른 edge가 둘 이상일 때만 그 node를 합류점으로 보고 총 유입량을 기록합니다(그 외 0).
+- **capacity margin**: station의 유입/유출 중 큰 값(`peak`)을 선언 capacity와 비교해 여유량·사용률·초과 여부를 계산합니다.
+
+도달 불가 수요는 2차의 `CDV-DEMAND-003`에서 이미 걸러지므로 flow 집계에 들어가지 않습니다. 집계는 정렬된 `demand_routes`와 `std::map` 누적만 사용하므로 동일 입력에서 동일 결과를 만들고, `edge_flows`/`node_flows`/`station_flows`는 각각 id 기준으로 정렬 출력됩니다.
+
+### 실행과 결과
+
+CLI 명령은 2차와 동일하며, `analyze` JSON report에 `edge_flows`·`node_flows`·`station_flows` 세 배열이 추가됩니다.
+
+```bash
+./build/sim-core analyze \
+  --facility examples/cross_domain/facility.json \
+  --scenario examples/cross_domain/scenario.json \
+  --from-to-csv examples/cross_domain/from_to.csv \
+  --output cross-domain-report.json
+```
+
+합성 예제(`OD-A-C`, 40/hour, 경로 `E-A-B → E-B-C`)의 결정론적 산출값:
+
+| Edge | Moves/hour | Flow share | Station | Inbound | Outbound | Capacity | Margin |
+|---|---:|---:|---|---:|---:|---:|---:|
+| `E-A-B` | 40 | 0.5 | `ST-A` | 0 | 40 | 120 | 80 |
+| `E-B-C` | 40 | 0.5 | `ST-C` | 40 | 0 | 120 | 80 |
+
+`analyze` 출력의 `edge_flows` 항목 예시:
+
+```json
+{
+  "edge_id": "E-A-B",
+  "from_node_id": "N-A",
+  "to_node_id": "N-B",
+  "expected_moves_per_hour": 40.0,
+  "flow_share": 0.5,
+  "demand_count": 1,
+  "contributing_demand_ids": ["OD-A-C"]
+}
+```
+
+단일 경로이므로 모든 node의 `merge_pressure`는 0입니다. 자동시험은 두 경로가 한 node로 합류하는 토폴로지를 in-memory로 구성해 `incoming_edge_count = 2`, `merge_pressure = 70`, 합류 station capacity margin `50`을 확인합니다.
+
+### 검증
+
+- 개발 버전 `0.2.0 → 0.3.0` 상향
+- flow 집계 시험 2개 추가(집계 정확성, merge 토폴로지) → 전체 `14/14 tests passed`
+- 빌드 경고 0개(`-Wall -Wextra -Wpedantic -Wconversion -Wshadow`)
+- Simulation Runtime을 바꾸지 않으므로 1차 Golden `trace_hash`(`70240b9d9276d97c`)와 `run_fingerprint`(`5004192c136cc90e`) 불변
+- `analyze` 출력은 동일 입력에서 반복 실행 시 byte 단위로 동일
+
+- [3차 Flow Intelligence 개발 기준과 검증 결과](docs/development/VERTICAL_SLICE_03.md)
+
+## 4·5차 개발: 통합 Workbench
+
+4차에서는 1–3차 Core를 한 화면에서 실행하는 UI Workbench를 추가했고, 5차에서는 HTTP 서버와 브라우저 의존성을 제거한 Windows 네이티브 데스크톱 앱으로 전환했습니다.
+
+현재 Windows 실행파일 하나에서 다음 기능을 사용할 수 있습니다.
+
+- Facility/Scenario/From-To 입력 선택과 Canonical Network 2D 표시
+- 1차 결정론적 DES `validate`·`run`과 Run Manifest 확인
+- 2차 Cross-Domain `analyze`와 경로·진단 결과 확인
+- 3차 Edge/Node/Station Flow 지표와 레이아웃 Overlay 확인
+- DXF LINE·ARC를 방향성 Graph JSON으로 실제 변환하고 2D 화면에서 확인·저장
+- Bottleneck/ROI, Policy A/B, Digital Twin의 후속 입력 계약 미리보기
+
+DXF Graph 변환은 데스크톱 앱 안에서 실제로 동작합니다. 다만 geometry 기반 방향은 추정값이므로 실제 OHT 방향 데이터와 대조가 필요하며, 생성된 Graph JSON을 Canonical Facility Model로 승격하는 Adapter는 후속 범위입니다. Bottleneck/ROI 등 나머지 5차 이후 분석 기능은 화면에서 `UI 프로토타입`으로 구분합니다.
+
+GitHub Actions의 `Sim_Core Native Desktop - Windows EXE` 결과에서 `Sim_Core_Flow_Workbench-windows-x64` Artifact를 내려받아 압축을 푼 뒤 `Sim_Core_Flow_Workbench.exe`를 실행하면 됩니다. 자세한 개발·패키징 방법은 [Native Desktop Workbench 안내](desktop/README.md)를 참고합니다.
+
 ## 핵심 설계 원칙
 
 1. Legacy 시스템은 참고 자료이며 Target Architecture가 아닙니다.
