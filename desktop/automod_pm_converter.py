@@ -384,6 +384,14 @@ def _station_control_points(
 
 
 def _branch_control_points(paths: Sequence[GuidePath]) -> list[ControlPoint]:
+    """Anchor route decisions on the common approach, never an outgoing edge.
+
+    A control point placed exactly at a split can be owned by either outgoing
+    AutoMod guide path.  Keeping it 10 mm before the junction makes the point
+    unambiguously belong to the single incoming path, so a later Dijkstra
+    router can evaluate both outgoing alternatives from the same route node.
+    """
+
     outgoing: dict[int, list[GuidePath]] = {}
     incoming: dict[int, list[GuidePath]] = {}
     for path in paths:
@@ -410,6 +418,8 @@ def _branch_control_points(paths: Sequence[GuidePath]) -> list[ControlPoint]:
             ControlPoint(
                 f"branch_{index}",
                 "BranchControlPoint",
+                # Deliberately attach to the common incoming path.  Attaching
+                # at the junction can bind the CP to one outgoing alternative.
                 approach.name,
                 approach.length - BRANCH_OFFSET_MILLIMETERS,
             )
