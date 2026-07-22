@@ -111,8 +111,12 @@ py desktop\automod_pm_converter.py layout.graph.json --output model.arc
 `.h`, `model.dir`은 만들지 않습니다. AutoMod에서 `model.amo`를 열고 빌드하면
 `model.dir`이 생성됩니다.
 
-`pm.asy`는 AutoMod 12.6 AGVS System 형식이며 좌표는 `Millimeters`, 각 Graph
-Node는 `cp_node_<번호>` Control Point로 생성됩니다. 차량 수는 0으로 두므로
+`pm.asy`는 AutoMod 12.6 AGVS System 형식이며 좌표는 `Millimeters`입니다.
+Control Point는 모든 Graph Node에 만들지 않고 CAD의 `station-*` TEXT/MTEXT 위치에만
+Station Control Point로 생성합니다. 진행 방향 기준으로 Edge가 두 갈래 이상으로
+갈라지는 Node에는 진입 Edge 끝의 정확히 10 mm 전 위치에 `branch_*` Control Point를
+하나 추가합니다. Branch 크기는 Station의 1/3입니다. 일반 곡선 접점과 합류점에는
+Control Point를 추가하지 않습니다. 차량 수는 0으로 두므로
 AutoMod에서 모델을 연 뒤 차량 종류·수량과 운행 로직을 추가할 수 있습니다.
 Graph에서 하나로 통합된 DXF ARC Edge는 AutoMod에서도 중심점과 회전각을 가진
 반지름 450 mm의 단일 원호 `GPATH`로 생성됩니다. 450 mm 원호와 일치하지 않는
