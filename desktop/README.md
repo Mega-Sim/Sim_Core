@@ -115,8 +115,10 @@ py desktop\automod_pm_converter.py layout.graph.json --output model.arc
 Control Point는 모든 Graph Node에 만들지 않고 CAD의 `station-*` TEXT/MTEXT 위치에만
 Station Control Point로 생성합니다. 진행 방향 기준으로 Edge가 두 갈래 이상으로
 갈라지는 Node에는 진입 Edge 끝의 정확히 10 mm 전 위치에 `branch_*` Control Point를
-하나 추가합니다. Branch 크기는 Station의 1/3입니다. 일반 곡선 접점과 합류점에는
-Control Point를 추가하지 않습니다. 차량 수는 0으로 두므로
+하나 추가합니다. 분기점 좌표에 바로 놓으면 두 출구 Edge 중 하나에 소속될 수 있으므로,
+공통 진입 Edge에 소속되는 10 mm 전 지점에서 향후 다익스트라 경로 선택이 두 출구를
+동등하게 비교할 수 있도록 한 것입니다. Branch 크기는 Station의 1/3입니다. 일반
+곡선 접점과 합류점에는 Control Point를 추가하지 않습니다. 차량 수는 0으로 두므로
 AutoMod에서 모델을 연 뒤 차량 종류·수량과 운행 로직을 추가할 수 있습니다.
 Graph에서 하나로 통합된 DXF ARC Edge는 AutoMod에서도 중심점과 회전각을 가진
 반지름 450 mm의 단일 원호 `GPATH`로 생성됩니다. 450 mm 원호와 일치하지 않는
