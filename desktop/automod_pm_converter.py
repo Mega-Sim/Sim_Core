@@ -20,7 +20,9 @@ from typing import Any, Sequence
 AUTOMOD_VERSION = "12.6.1.12"
 ARC_RADIUS_MILLIMETERS = 450.0
 ARC_RADIUS_TOLERANCE_MILLIMETERS = 2.0
-CONTROL_POINT_SCALE = 0.2
+STATION_CONTROL_POINT_SCALE = 0.2
+BRANCH_CONTROL_POINT_SCALE = STATION_CONTROL_POINT_SCALE / 3.0
+BRANCH_OFFSET_MILLIMETERS = 10.0
 UNIT_TO_MILLIMETERS = {
     "millimeter": 1.0,
     "meter": 1000.0,
@@ -52,6 +54,14 @@ class GuidePath:
     @property
     def is_arc(self) -> bool:
         return self.center is not None and self.sweep_radians is not None
+
+
+@dataclass(frozen=True)
+class ControlPoint:
+    name: str
+    type_name: str
+    path_name: str
+    distance: float
 
 
 @dataclass(frozen=True)
@@ -210,7 +220,7 @@ def _fixed_radius_arc(
 
 def _guide_paths(
     graph: dict[str, Any],
-) -> tuple[list[GuidePath], dict[int, tuple[str, float]]]:
+) -> tuple[list[GuidePath], list[tuple[float, float]]]:
     raw_nodes = graph.get("nodes")
     raw_edges = graph.get("edges")
     if not isinstance(raw_nodes, list) or not raw_nodes:
@@ -218,15 +228,21 @@ def _guide_paths(
     if not isinstance(raw_edges, list) or not raw_edges:
         raise AutoModConversionError("Graph에 Edge가 없습니다.")
 
-    nodes = [_point(value, label=f"Node {index}") for index, value in enumerate(raw_nodes)]
+    source_nodes = [
+        _point(value, label=f"Node {index}")
+        for index, value in enumerate(raw_nodes)
+    ]
     scale = _unit_scale(graph)
+    nodes = [_scaled(point, scale) for point in source_nodes]
     paths: list[GuidePath] = []
-    node_anchors: dict[int, tuple[str, float]] = {}
+    connected_nodes: set[int] = set()
 
     for edge_index, edge in enumerate(raw_edges):
         if not isinstance(edge, dict):
             raise AutoModConversionError(f"Edge {edge_index} 형식이 올바르지 않습니다.")
-        points, source, target = _edge_points(edge, nodes, edge_index=edge_index)
+        points, source, target = _edge_points(
+            edge, source_nodes, edge_index=edge_index
+        )
         points = [_scaled(point, scale) for point in points]
         if math.dist(points[0], points[-1]) <= 1e-9:
             raise AutoModConversionError(f"Edge {edge_index}의 길이가 0입니다.")
@@ -244,26 +260,170 @@ def _guide_paths(
             sweep_radians=sweep,
         )
         paths.append(path)
-        node_anchors.setdefault(source, (path.name, 0.0))
-        node_anchors.setdefault(target, (path.name, path.length))
+        connected_nodes.update((source, target))
 
-    isolated_nodes = sorted(set(range(len(nodes))) - set(node_anchors))
+    isolated_nodes = sorted(set(range(len(nodes))) - connected_nodes)
     if isolated_nodes:
         preview = ", ".join(str(index) for index in isolated_nodes[:8])
         raise AutoModConversionError(
             f"Guide Path에 연결되지 않은 Node가 있습니다: {preview}"
         )
-    return paths, node_anchors
+    return paths, nodes
+
+
+def _project_to_path(
+    point: tuple[float, float], path: GuidePath
+) -> tuple[float, float]:
+    """Return ``(distance_error, distance_along_path)`` for the nearest point."""
+
+    if not path.is_arc:
+        vector = (path.end[0] - path.start[0], path.end[1] - path.start[1])
+        length_squared = vector[0] * vector[0] + vector[1] * vector[1]
+        parameter = (
+            (point[0] - path.start[0]) * vector[0]
+            + (point[1] - path.start[1]) * vector[1]
+        ) / length_squared
+        parameter = max(0.0, min(1.0, parameter))
+        projected = (
+            path.start[0] + vector[0] * parameter,
+            path.start[1] + vector[1] * parameter,
+        )
+        return math.dist(point, projected), path.length * parameter
+
+    assert path.center is not None
+    assert path.sweep_radians is not None
+    radius = math.dist(path.start, path.center)
+    start_angle = math.atan2(
+        path.start[1] - path.center[1], path.start[0] - path.center[0]
+    )
+    point_angle = math.atan2(
+        point[1] - path.center[1], point[0] - path.center[0]
+    )
+    candidates = [
+        (math.dist(point, path.start), 0.0),
+        (math.dist(point, path.end), path.length),
+    ]
+    if path.sweep_radians > 0:
+        swept_angle = (point_angle - start_angle) % (2.0 * math.pi)
+    else:
+        swept_angle = (start_angle - point_angle) % (2.0 * math.pi)
+    if swept_angle <= abs(path.sweep_radians) + 1e-9:
+        projection_angle = (
+            start_angle + swept_angle
+            if path.sweep_radians > 0
+            else start_angle - swept_angle
+        )
+        projected = (
+            path.center[0] + radius * math.cos(projection_angle),
+            path.center[1] + radius * math.sin(projection_angle),
+        )
+        candidates.append((math.dist(point, projected), radius * swept_angle))
+    return min(candidates, key=lambda candidate: (candidate[0], candidate[1]))
+
+
+def _control_point_name(text: str, *, fallback_index: int) -> str:
+    normalized = []
+    previous_was_separator = False
+    for character in text.strip().casefold():
+        if character.isascii() and character.isalnum():
+            normalized.append(character)
+            previous_was_separator = False
+        elif normalized and not previous_was_separator:
+            normalized.append("_")
+            previous_was_separator = True
+    name = "".join(normalized).strip("_")
+    if not name:
+        name = f"station_{fallback_index}"
+    if not name.startswith("station"):
+        name = f"station_{name}"
+    return name
+
+
+def _station_control_points(
+    graph: dict[str, Any], paths: Sequence[GuidePath]
+) -> list[ControlPoint]:
+    metadata = graph.get("metadata", {})
+    raw_labels = metadata.get("labels", []) if isinstance(metadata, dict) else []
+    station_labels = [
+        label
+        for label in raw_labels
+        if isinstance(label, dict)
+        and str(label.get("text", "")).strip().casefold().startswith("station")
+    ]
+    if not station_labels:
+        raise AutoModConversionError(
+            "CAD에서 station 이름의 TEXT/MTEXT를 찾지 못했습니다."
+        )
+
+    scale = _unit_scale(graph)
+    control_points: list[ControlPoint] = []
+    used_names: set[str] = set()
+    for index, label in enumerate(station_labels, start=1):
+        name = _control_point_name(str(label.get("text", "")), fallback_index=index)
+        if name in used_names:
+            raise AutoModConversionError(f"중복된 Station 이름입니다: {name}")
+        used_names.add(name)
+        try:
+            position = _scaled((float(label["x"]), float(label["y"])), scale)
+        except (KeyError, TypeError, ValueError) as error:
+            raise AutoModConversionError(
+                f"Station {name} 좌표가 올바르지 않습니다."
+            ) from error
+        path, (_, distance) = min(
+            ((path, _project_to_path(position, path)) for path in paths),
+            key=lambda candidate: (
+                candidate[1][0],
+                candidate[0].name,
+                candidate[1][1],
+            ),
+        )
+        control_points.append(
+            ControlPoint(name, "StationControlPoint", path.name, distance)
+        )
+    return control_points
+
+
+def _branch_control_points(paths: Sequence[GuidePath]) -> list[ControlPoint]:
+    outgoing: dict[int, list[GuidePath]] = {}
+    incoming: dict[int, list[GuidePath]] = {}
+    for path in paths:
+        if path.source_node is not None:
+            outgoing.setdefault(path.source_node, []).append(path)
+        if path.target_node is not None:
+            incoming.setdefault(path.target_node, []).append(path)
+
+    branch_nodes = sorted(node for node, linked in outgoing.items() if len(linked) >= 2)
+    control_points: list[ControlPoint] = []
+    for index, node in enumerate(branch_nodes, start=1):
+        approach_paths = incoming.get(node, [])
+        if len(approach_paths) != 1:
+            raise AutoModConversionError(
+                f"분기 Node {node}의 진입 Edge가 {len(approach_paths)}개여서 "
+                "10 mm 전 Branch 위치를 하나로 결정할 수 없습니다."
+            )
+        approach = approach_paths[0]
+        if approach.length < BRANCH_OFFSET_MILLIMETERS:
+            raise AutoModConversionError(
+                f"분기 Node {node}의 진입 Edge가 10 mm보다 짧습니다."
+            )
+        control_points.append(
+            ControlPoint(
+                f"branch_{index}",
+                "BranchControlPoint",
+                approach.name,
+                approach.length - BRANCH_OFFSET_MILLIMETERS,
+            )
+        )
+    return control_points
 
 
 def render_pm_asy(graph: dict[str, Any]) -> str:
     """Render a complete AutoMod 12.6 AGVS system as CRLF text."""
 
-    paths, node_anchors = _guide_paths(graph)
-    seed_path = paths[0]
-    if seed_path.source_node is None:
-        raise AutoModConversionError("AutoMod 시작 Guide Path를 결정할 수 없습니다.")
-    seed_cp = f"cp_node_{seed_path.source_node + 1}"
+    paths, _ = _guide_paths(graph)
+    stations = _station_control_points(graph, paths)
+    branches = _branch_control_points(paths)
+    seed_cp = stations[0]
 
     lines = [
         f"VERSION {AUTOMOD_VERSION}",
@@ -281,9 +441,9 @@ def render_pm_asy(graph: dict[str, Any]) -> str:
         "\tControl Points Inherit",
         "\tControl Point Names Invisible Inherit",
         "\tTransfers Invisible Inherit",
-        f"AGVSDEF secname {seed_path.name} name {seed_cp} UserId 2",
-        f"\tNEXTPATH name {seed_path.name} type DefaultGuidePath",
-        f"\tNEXTCP name {seed_cp} type DefaultControlPoint",
+        f"AGVSDEF secname {seed_cp.path_name} name {seed_cp.name} UserId 2",
+        f"\tNEXTPATH name {seed_cp.path_name} type DefaultGuidePath",
+        f"\tNEXTCP name {seed_cp.name} type StationControlPoint",
         "\tALTERNATE NONE ResumeSpeedWhenClaimed",
         "\tvel 0 Infinite Meters Seconds",
         "\tcrabvel 0 Infinite Meters Seconds",
@@ -322,15 +482,19 @@ def render_pm_asy(graph: dict[str, Any]) -> str:
                 )
             )
     lines.append(
-        "CPOINTTYPE name DefaultControlPoint cap 2147483647 release distance 0 Feet "
-        f"align leadingpap limit Infinite scale {_number(CONTROL_POINT_SCALE)} "
-        f"color -1 nrot 0 nscale {_number(CONTROL_POINT_SCALE)}"
+        "CPOINTTYPE name StationControlPoint cap 2147483647 release distance 0 Feet "
+        f"align leadingpap limit Infinite scale {_number(STATION_CONTROL_POINT_SCALE)} "
+        f"color -1 nrot 0 nscale {_number(STATION_CONTROL_POINT_SCALE)}"
     )
-    for node_index in range(len(node_anchors)):
-        path_name, distance = node_anchors[node_index]
+    lines.append(
+        "CPOINTTYPE name BranchControlPoint cap 2147483647 release distance 0 Feet "
+        f"align leadingpap limit Infinite scale {_number(BRANCH_CONTROL_POINT_SCALE)} "
+        f"color -1 nrot 0 nscale {_number(BRANCH_CONTROL_POINT_SCALE)}"
+    )
+    for control_point in [*stations, *branches]:
         lines.append(
-            f"CPOINT name cp_node_{node_index + 1} type DefaultControlPoint "
-            f"at {path_name} {_number(distance)}"
+            f"CPOINT name {control_point.name} type {control_point.type_name} "
+            f"at {control_point.path_name} {_number(control_point.distance)}"
         )
 
     lines.extend(
