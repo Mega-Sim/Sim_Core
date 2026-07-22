@@ -79,6 +79,8 @@ Rail Layer를 비워 두면 모든 LINE·ARC Layer를 읽습니다. 여러 Layer
 
 방향은 CAD geometry의 연결성과 진행 벡터를 이용한 추정값입니다. 실제 OHT 운행 방향 데이터와 반드시 대조한 뒤 시뮬레이션 입력으로 승격해야 합니다.
 
+대형 FAB 도면은 Linear Analyzer 자료와 같은 방식으로 전체 geometry를 무차별 비교하지 않고, 선분 경계 안에 있는 endpoint 후보만 공간 인덱스로 조회합니다. `development_src/Linear_Analyzer`의 대형 DXF를 사용하는 성능 회귀 시험이 Windows 빌드 과정에 포함되어 있습니다.
+
 UI 없이 직접 변환할 수도 있습니다.
 
 ```powershell

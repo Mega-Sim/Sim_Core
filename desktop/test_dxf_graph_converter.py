@@ -5,13 +5,17 @@ from __future__ import annotations
 import json
 import math
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import ezdxf
 
+import dxf_graph_converter
 from dxf_graph_converter import (
     DxfConversionError,
+    build_nodes_edges,
     convert_dxf_to_graph,
     load_dxf_lines,
     save_graph,
@@ -112,6 +116,25 @@ class DxfGraphConverterTest(unittest.TestCase):
         self.assertGreater(outgoing, 0)
         self.assertGreater(incoming, 0)
 
+    def test_touching_endpoint_spatial_index_prunes_distant_candidates(self) -> None:
+        segment_count = 2000
+        segments = [
+            ((float(index * 100), 0.0), (float(index * 100 + 10), 0.0))
+            for index in range(segment_count)
+        ]
+
+        original = dxf_graph_converter._point_on_segment_parameter
+        with patch.object(
+            dxf_graph_converter,
+            "_point_on_segment_parameter",
+            wraps=original,
+        ) as point_test:
+            nodes, edges = build_nodes_edges(segments)
+
+        self.assertEqual(len(nodes), segment_count * 2)
+        self.assertEqual(len(edges), segment_count)
+        self.assertLess(point_test.call_count, segment_count * 5)
+
     def test_forward_branch_continues_from_one_seed_thread(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "forward-branch-layout.dxf"
@@ -169,6 +192,28 @@ class DxfGraphConverterTest(unittest.TestCase):
         self.assertEqual(
             payload["metadata"]["converter"]["reference_repository"],
             "Mega-Sim/Graph_Maker_CAD-dxf-_to_json",
+        )
+
+    def test_linear_analyzer_reference_layout_converts_within_budget(self) -> None:
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "development_src"
+            / "Linear_Analyzer"
+            / "SemiLA"
+            / "Encoded_190519_P2L_7F_FAB_ Layout_Text_Lower_final.dxf"
+        )
+        self.assertTrue(source.is_file(), source)
+
+        started = time.perf_counter()
+        graph = convert_dxf_to_graph(source)
+        elapsed = time.perf_counter() - started
+
+        self.assertGreater(len(graph["nodes"]), 30_000)
+        self.assertGreater(len(graph["edges"]), 30_000)
+        self.assertLess(
+            elapsed,
+            15.0,
+            f"Linear Analyzer reference DXF conversion took {elapsed:.3f}s",
         )
 
 

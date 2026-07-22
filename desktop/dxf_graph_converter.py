@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import math
+from bisect import bisect_left, bisect_right
 from collections import Counter, defaultdict, deque
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,7 +22,7 @@ import ezdxf
 
 
 CONVERTER_NAME = "sim-core-dxf-graph"
-CONVERTER_VERSION = "1.0.0"
+CONVERTER_VERSION = "1.1.0"
 SUPPORTED_ENTITY_TYPES = ("LINE", "ARC")
 MIN_CONTINUATION_DOT = -0.15
 
@@ -107,14 +108,50 @@ def _split_segments_at_touching_endpoints(
     independent direction and appear as an impossible dead-end.
     """
 
-    endpoints: list[Point] = []
-    for start, end in segments:
-        endpoints.extend((start, end))
+    # The former implementation compared every segment with every endpoint.
+    # A production FAB drawing can contain tens of thousands of ARC-generated
+    # segments, turning this stage into billions of geometric tests.  Keep the
+    # exact same point-on-segment test, but use two sorted spatial indexes to
+    # reduce each segment to endpoints inside its bounding box.
+    endpoints = list(
+        dict.fromkeys(point for segment in segments for point in segment)
+    )
+    endpoints_by_x = sorted(
+        range(len(endpoints)),
+        key=lambda index: (endpoints[index][0], endpoints[index][1]),
+    )
+    endpoints_by_y = sorted(
+        range(len(endpoints)),
+        key=lambda index: (endpoints[index][1], endpoints[index][0]),
+    )
+    x_values = [endpoints[index][0] for index in endpoints_by_x]
+    y_values = [endpoints[index][1] for index in endpoints_by_y]
 
     split_segments: list[Segment] = []
     for start, end in segments:
         cuts: list[tuple[float, Point]] = [(0.0, start), (1.0, end)]
-        for point in endpoints:
+        min_x = min(start[0], end[0]) - tolerance
+        max_x = max(start[0], end[0]) + tolerance
+        min_y = min(start[1], end[1]) - tolerance
+        max_y = max(start[1], end[1]) + tolerance
+
+        x_first = bisect_left(x_values, min_x)
+        x_last = bisect_right(x_values, max_x)
+        y_first = bisect_left(y_values, min_y)
+        y_last = bisect_right(y_values, max_y)
+
+        # Query the axis with fewer candidates, then apply the other bounding
+        # coordinate before the more expensive projection/distance test.  The
+        # final index sort preserves the original endpoint encounter order.
+        if x_last - x_first <= y_last - y_first:
+            candidate_indexes = endpoints_by_x[x_first:x_last]
+        else:
+            candidate_indexes = endpoints_by_y[y_first:y_last]
+
+        for endpoint_index in sorted(candidate_indexes):
+            point = endpoints[endpoint_index]
+            if not (min_x <= point[0] <= max_x and min_y <= point[1] <= max_y):
+                continue
             parameter = _point_on_segment_parameter(
                 point, start, end, tolerance=tolerance
             )
@@ -350,12 +387,16 @@ def build_directed_graph(
         node_edges[int(edge["end"])].append(edge_id)
 
     thread_count = 0
-    while True:
-        seed = next(
-            (index for index, edge in enumerate(directed) if edge["dir"] is None), None
-        )
-        if seed is None:
+    next_seed = 0
+    while next_seed < len(directed):
+        # Resume where the previous scan stopped.  Restarting enumerate() at
+        # edge 0 made drawings with many disconnected spans quadratic even
+        # after the geometry stage had completed.
+        while next_seed < len(directed) and directed[next_seed]["dir"] is not None:
+            next_seed += 1
+        if next_seed >= len(directed):
             break
+        seed = next_seed
         thread_count += 1
         seed_edge = directed[seed]
         seed_edge["dir"] = [int(seed_edge["start"]), int(seed_edge["end"])]

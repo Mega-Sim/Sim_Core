@@ -15,6 +15,7 @@ import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import QLineF, QProcess, QRectF, Qt, Signal
@@ -721,12 +722,12 @@ class MainWindow(QMainWindow):
         for column, (name, field) in enumerate([("도면 단위", self.cad_unit), ("Rail Layer (선택)", self.rail_layer), ("ARC 분할 수", self.arc_segments), ("좌표 반올림", self.coordinate_precision)]):
             form.addWidget(styled_label(name, "FieldLabel"), 1, column)
             form.addWidget(field, 2, column)
-        convert = button("↻  DXF 다시 변환", "secondary")
-        convert.clicked.connect(self.convert_cad_graph)
+        self.cad_convert_button = button("↻  DXF 다시 변환", "secondary")
+        self.cad_convert_button.clicked.connect(self.convert_cad_graph)
         self.cad_save_button = button("Graph JSON 저장", "primary")
         self.cad_save_button.setEnabled(False)
         self.cad_save_button.clicked.connect(self.save_cad_graph)
-        form.addWidget(convert, 3, 2)
+        form.addWidget(self.cad_convert_button, 3, 2)
         form.addWidget(self.cad_save_button, 3, 3)
         layout.addWidget(contract)
 
@@ -1037,7 +1038,11 @@ class MainWindow(QMainWindow):
             if item.strip()
         ] or None
         self.cad_graph_status.setText("DXF geometry를 Graph로 변환하는 중입니다…")
+        self.cad_convert_button.setEnabled(False)
+        self.cad_save_button.setEnabled(False)
         QApplication.setOverrideCursor(Qt.WaitCursor)
+        QApplication.processEvents()
+        started = perf_counter()
         try:
             graph = convert_dxf_to_graph(
                 self.cad_path,
@@ -1056,10 +1061,12 @@ class MainWindow(QMainWindow):
             return
         finally:
             QApplication.restoreOverrideCursor()
+            self.cad_convert_button.setEnabled(True)
 
         self.cad_graph = graph
         self.cad_graph_path = None
         self.cad_graph_view.set_graph(graph)
+        elapsed = perf_counter() - started
         self.cad_save_button.setEnabled(True)
         metadata = graph["metadata"]
         statistics = metadata["statistics"]
@@ -1068,11 +1075,11 @@ class MainWindow(QMainWindow):
             f"{statistics['node_count']} Nodes  ·  {statistics['edge_count']} Edges  ·  "
             f"{statistics['component_count']} Components\n"
             f"방향 추정 {statistics['edge_count'] - statistics['unresolved_direction_count']} / {statistics['edge_count']}  ·  "
-            f"Layer {layers_text}  ·  저장 전"
+            f"Layer {layers_text}  ·  변환 {elapsed:.2f}초  ·  저장 전"
         )
         self.cad_graph_status.setToolTip("방향은 CAD geometry 기반 추정값입니다. 실제 OHT 운행 방향과 대조가 필요합니다.")
         self.statusBar().showMessage(
-            f"DXF Graph 변환 완료 · {statistics['node_count']} nodes / {statistics['edge_count']} edges",
+            f"DXF Graph 변환 완료 · {statistics['node_count']} nodes / {statistics['edge_count']} edges · {elapsed:.2f}초",
             8000,
         )
 

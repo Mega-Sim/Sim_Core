@@ -3,6 +3,7 @@
 /out/
 /run-output/
 /.cache/
+/.venv/
 /.sim_core_ui/
 __pycache__/
 *.py[cod]
