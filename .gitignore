@@ -1,0 +1,9 @@
+/build/
+/build-*/
+/out/
+/run-output/
+/.cache/
+/.sim_core_ui/
+__pycache__/
+*.py[cod]
+compile_commands.json

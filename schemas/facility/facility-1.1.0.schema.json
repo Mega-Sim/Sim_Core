@@ -1,0 +1,215 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mega-sim.github.io/sim-core/schemas/facility/1.1.0",
+  "title": "Sim_Core Canonical Facility Model 1.1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "model_id", "revision_id", "content_hash",
+    "coordinate_reference", "source_artifacts", "geometry_transforms",
+    "nodes", "edges", "stations", "control_points", "zones",
+    "parkings", "chargers", "vehicle_types"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.1.0" },
+    "model_id": { "$ref": "#/$defs/id" },
+    "revision_id": { "$ref": "#/$defs/id" },
+    "content_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "coordinate_reference": { "$ref": "#/$defs/coordinate_reference" },
+    "source_artifacts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/source_artifact" }
+    },
+    "geometry_transforms": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/geometry_transform" }
+    },
+    "nodes": {
+      "type": "array", "minItems": 1,
+      "items": { "$ref": "#/$defs/node" }
+    },
+    "edges": {
+      "type": "array", "minItems": 1,
+      "items": { "$ref": "#/$defs/edge" }
+    },
+    "stations": {
+      "type": "array", "minItems": 1,
+      "items": { "$ref": "#/$defs/station" }
+    },
+    "control_points": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/control_point" }
+    },
+    "zones": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/zone" }
+    },
+    "parkings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/parking" }
+    },
+    "chargers": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/charger" }
+    },
+    "vehicle_types": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/vehicle_type" }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string", "minLength": 1, "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "position": {
+      "type": "object", "additionalProperties": false,
+      "required": ["x", "y", "z"],
+      "properties": {
+        "x": { "type": "integer" },
+        "y": { "type": "integer" },
+        "z": { "type": "integer" }
+      }
+    },
+    "source_identity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source_kind", "source_namespace", "external_id"],
+      "properties": {
+        "source_kind": { "type": "string", "minLength": 1 },
+        "source_namespace": { "type": "string", "minLength": 1 },
+        "external_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "source_identities": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/source_identity" }
+    },
+    "source_artifact": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "source_namespace", "sha256", "importer_name", "importer_version"],
+      "properties": {
+        "kind": { "type": "string", "minLength": 1 },
+        "source_namespace": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "importer_name": { "type": "string", "minLength": 1 },
+        "importer_version": { "type": "string", "minLength": 1 },
+        "coordinate_frame": { "type": "string", "minLength": 1 }
+      }
+    },
+    "coordinate_reference": {
+      "type": "object", "additionalProperties": false,
+      "required": ["frame", "length_unit", "up_axis", "handedness"],
+      "properties": {
+        "frame": { "type": "string", "minLength": 1 },
+        "length_unit": { "const": "micrometer" },
+        "up_axis": { "enum": ["X", "Y", "Z"] },
+        "handedness": { "enum": ["left", "right"] }
+      }
+    },
+    "geometry_transform": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source_namespace", "source_frame", "target_frame", "scale_numerator", "scale_denominator", "translation_um"],
+      "properties": {
+        "source_namespace": { "type": "string", "minLength": 1 },
+        "source_frame": { "type": "string", "minLength": 1 },
+        "target_frame": { "type": "string", "minLength": 1 },
+        "scale_numerator": { "type": "integer", "minimum": 1 },
+        "scale_denominator": { "type": "integer", "minimum": 1 },
+        "translation_um": { "$ref": "#/$defs/position" }
+      }
+    },
+    "node": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "position_um", "layer", "role"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "position_um": { "$ref": "#/$defs/position" },
+        "layer": { "type": "string", "minLength": 1 },
+        "role": { "type": "string", "minLength": 1 },
+        "source_identities": { "$ref": "#/$defs/source_identities" }
+      }
+    },
+    "edge": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "from_node_id", "to_node_id", "length_um", "speed_limit_um_per_s", "polyline_um", "direction"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "from_node_id": { "$ref": "#/$defs/id" },
+        "to_node_id": { "$ref": "#/$defs/id" },
+        "length_um": { "type": "integer", "minimum": 1 },
+        "speed_limit_um_per_s": { "type": "integer", "minimum": 1, "maximum": 1000000000000 },
+        "polyline_um": { "type": "array", "minItems": 2, "items": { "$ref": "#/$defs/position" } },
+        "direction": { "const": "ONE_WAY" },
+        "source_identities": { "$ref": "#/$defs/source_identities" }
+      }
+    },
+    "station": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "attachment_node_id", "operation_type"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "attachment_node_id": { "$ref": "#/$defs/id" },
+        "operation_type": { "type": "string", "minLength": 1 },
+        "position_um": { "$ref": "#/$defs/position" },
+        "handling_capacity_per_hour": { "type": "number", "minimum": 0 },
+        "semantic_tags": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "source_identities": { "$ref": "#/$defs/source_identities" }
+      }
+    },
+    "control_point": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "attachment_node_id", "control_type"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "attachment_node_id": { "$ref": "#/$defs/id" },
+        "control_type": { "type": "string", "minLength": 1 },
+        "source_identities": { "$ref": "#/$defs/source_identities" }
+      }
+    },
+    "zone": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "node_ids", "edge_ids", "capacity"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "node_ids": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+        "edge_ids": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+        "capacity": { "type": "integer", "minimum": 1 },
+        "source_identities": { "$ref": "#/$defs/source_identities" }
+      }
+    },
+    "parking": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "station_id", "capacity", "allowed_vehicle_type_ids"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "station_id": { "$ref": "#/$defs/id" },
+        "capacity": { "type": "integer", "minimum": 1 },
+        "allowed_vehicle_type_ids": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+        "source_identities": { "$ref": "#/$defs/source_identities" }
+      }
+    },
+    "charger": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "station_id", "capacity", "compatible_vehicle_type_ids"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "station_id": { "$ref": "#/$defs/id" },
+        "capacity": { "type": "integer", "minimum": 1 },
+        "compatible_vehicle_type_ids": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+        "source_identities": { "$ref": "#/$defs/source_identities" }
+      }
+    },
+    "vehicle_type": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "maximum_speed_um_per_s", "length_um", "width_um", "height_um"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "maximum_speed_um_per_s": { "type": "integer", "minimum": 1 },
+        "length_um": { "type": "integer", "minimum": 1 },
+        "width_um": { "type": "integer", "minimum": 1 },
+        "height_um": { "type": "integer", "minimum": 1 },
+        "source_identities": { "$ref": "#/$defs/source_identities" }
+      }
+    }
+  }
+}

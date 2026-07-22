@@ -1,0 +1,163 @@
+{
+  "schema_version": "1.1.0",
+  "model_id": "cross-domain-loop",
+  "revision_id": "cross-domain-loop-v1",
+  "content_hash": "sha256:770c1076dfdbe701fab9f030517707b8dd6dde900018d3895e7e5f131839caeb",
+  "coordinate_reference": {
+    "frame": "local-fab",
+    "length_unit": "micrometer",
+    "up_axis": "Z",
+    "handedness": "right"
+  },
+  "source_artifacts": [
+    {
+      "kind": "synthetic_fixture",
+      "source_namespace": "sim-core:cross-domain",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "importer_name": "sim-core-fixture",
+      "importer_version": "1.1.0",
+      "coordinate_frame": "engineering-local"
+    }
+  ],
+  "geometry_transforms": [
+    {
+      "source_namespace": "sim-core:cross-domain",
+      "source_frame": "engineering-local",
+      "target_frame": "local-fab",
+      "scale_numerator": 1,
+      "scale_denominator": 1,
+      "translation_um": { "x": 0, "y": 0, "z": 0 }
+    }
+  ],
+  "nodes": [
+    {
+      "id": "N-A",
+      "position_um": { "x": 0, "y": 0, "z": 0 },
+      "layer": "L1",
+      "role": "rail_station",
+      "source_identities": [
+        {
+          "source_kind": "synthetic_fixture",
+          "source_namespace": "sim-core:cross-domain",
+          "external_id": "node:A"
+        }
+      ]
+    },
+    {
+      "id": "N-B",
+      "position_um": { "x": 10000000, "y": 0, "z": 0 },
+      "layer": "L1",
+      "role": "rail_merge"
+    },
+    {
+      "id": "N-C",
+      "position_um": { "x": 30000000, "y": 0, "z": 0 },
+      "layer": "L1",
+      "role": "rail_station"
+    }
+  ],
+  "edges": [
+    {
+      "id": "E-A-B",
+      "from_node_id": "N-A",
+      "to_node_id": "N-B",
+      "length_um": 10000000,
+      "speed_limit_um_per_s": 2000000,
+      "polyline_um": [
+        { "x": 0, "y": 0, "z": 0 },
+        { "x": 10000000, "y": 0, "z": 0 }
+      ],
+      "direction": "ONE_WAY"
+    },
+    {
+      "id": "E-B-C",
+      "from_node_id": "N-B",
+      "to_node_id": "N-C",
+      "length_um": 20000000,
+      "speed_limit_um_per_s": 2000000,
+      "polyline_um": [
+        { "x": 10000000, "y": 0, "z": 0 },
+        { "x": 30000000, "y": 0, "z": 0 }
+      ],
+      "direction": "ONE_WAY"
+    },
+    {
+      "id": "E-C-A",
+      "from_node_id": "N-C",
+      "to_node_id": "N-A",
+      "length_um": 30000000,
+      "speed_limit_um_per_s": 2000000,
+      "polyline_um": [
+        { "x": 30000000, "y": 0, "z": 0 },
+        { "x": 0, "y": 0, "z": 0 }
+      ],
+      "direction": "ONE_WAY"
+    }
+  ],
+  "stations": [
+    {
+      "id": "ST-A",
+      "attachment_node_id": "N-A",
+      "operation_type": "PARKING",
+      "position_um": { "x": 0, "y": 0, "z": 0 },
+      "handling_capacity_per_hour": 120,
+      "semantic_tags": ["parking"]
+    },
+    {
+      "id": "ST-B",
+      "attachment_node_id": "N-B",
+      "operation_type": "LOAD",
+      "position_um": { "x": 10000000, "y": 0, "z": 0 },
+      "handling_capacity_per_hour": 120,
+      "semantic_tags": ["equipment_port"]
+    },
+    {
+      "id": "ST-C",
+      "attachment_node_id": "N-C",
+      "operation_type": "UNLOAD",
+      "position_um": { "x": 30000000, "y": 0, "z": 0 },
+      "handling_capacity_per_hour": 120,
+      "semantic_tags": ["equipment_port"]
+    }
+  ],
+  "control_points": [
+    {
+      "id": "CP-B",
+      "attachment_node_id": "N-B",
+      "control_type": "MERGE"
+    }
+  ],
+  "zones": [
+    {
+      "id": "ZONE-MAIN",
+      "node_ids": ["N-A", "N-B", "N-C"],
+      "edge_ids": ["E-A-B", "E-B-C", "E-C-A"],
+      "capacity": 4
+    }
+  ],
+  "parkings": [
+    {
+      "id": "PARK-A",
+      "station_id": "ST-A",
+      "capacity": 2,
+      "allowed_vehicle_type_ids": ["OHT-STANDARD"]
+    }
+  ],
+  "chargers": [
+    {
+      "id": "CHARGER-B",
+      "station_id": "ST-B",
+      "capacity": 1,
+      "compatible_vehicle_type_ids": ["OHT-STANDARD"]
+    }
+  ],
+  "vehicle_types": [
+    {
+      "id": "OHT-STANDARD",
+      "maximum_speed_um_per_s": 5000000,
+      "length_um": 1200000,
+      "width_um": 700000,
+      "height_um": 500000
+    }
+  ]
+}

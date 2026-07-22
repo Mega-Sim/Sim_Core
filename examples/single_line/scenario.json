@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0.0",
+  "scenario_id": "single-line-job",
+  "model_revision_id": "single-line-v1",
+  "duration_us": 60000000,
+  "zero_delay_event_limit": 1000,
+  "master_seed": 20260718,
+  "vehicles": [
+    {
+      "id": "OHT-001",
+      "initial_station_id": "ST-START"
+    }
+  ],
+  "jobs": [
+    {
+      "id": "JOB-001",
+      "pickup_station_id": "ST-PICKUP",
+      "dropoff_station_id": "ST-DROPOFF",
+      "release_time_us": 0,
+      "load_duration_us": 2000000,
+      "unload_duration_us": 3000000
+    }
+  ]
+}

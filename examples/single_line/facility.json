@@ -1,0 +1,94 @@
+{
+  "schema_version": "1.0.0",
+  "model_id": "single-line",
+  "revision_id": "single-line-v1",
+  "content_hash": "sha256:3e7f7c9b33cb47ce31a1c1b2340e2269b1bd5c38f2e035d9d0b317f6eb51f924",
+  "coordinate_reference": {
+    "frame": "local-fab",
+    "length_unit": "micrometer",
+    "up_axis": "Z",
+    "handedness": "right"
+  },
+  "source_artifacts": [
+    {
+      "kind": "synthetic_fixture",
+      "source_namespace": "sim-core:golden",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "importer_name": "sim-core-fixture",
+      "importer_version": "1.0.0"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "N-START",
+      "position_um": { "x": 0, "y": 0, "z": 0 },
+      "layer": "L1",
+      "role": "rail_endpoint",
+      "source_identities": [
+        {
+          "source_kind": "synthetic_fixture",
+          "source_namespace": "sim-core:golden",
+          "external_id": "node:start"
+        }
+      ]
+    },
+    {
+      "id": "N-PICKUP",
+      "position_um": { "x": 10000000, "y": 0, "z": 0 },
+      "layer": "L1",
+      "role": "rail_station"
+    },
+    {
+      "id": "N-DROPOFF",
+      "position_um": { "x": 30000000, "y": 0, "z": 0 },
+      "layer": "L1",
+      "role": "rail_station"
+    }
+  ],
+  "edges": [
+    {
+      "id": "E-START-PICKUP",
+      "from_node_id": "N-START",
+      "to_node_id": "N-PICKUP",
+      "length_um": 10000000,
+      "speed_limit_um_per_s": 2000000,
+      "polyline_um": [
+        { "x": 0, "y": 0, "z": 0 },
+        { "x": 10000000, "y": 0, "z": 0 }
+      ],
+      "direction": "ONE_WAY"
+    },
+    {
+      "id": "E-PICKUP-DROPOFF",
+      "from_node_id": "N-PICKUP",
+      "to_node_id": "N-DROPOFF",
+      "length_um": 20000000,
+      "speed_limit_um_per_s": 2000000,
+      "polyline_um": [
+        { "x": 10000000, "y": 0, "z": 0 },
+        { "x": 30000000, "y": 0, "z": 0 }
+      ],
+      "direction": "ONE_WAY"
+    }
+  ],
+  "stations": [
+    {
+      "id": "ST-START",
+      "attachment_node_id": "N-START",
+      "operation_type": "PARKING",
+      "semantic_tags": ["station", "parking"]
+    },
+    {
+      "id": "ST-PICKUP",
+      "attachment_node_id": "N-PICKUP",
+      "operation_type": "LOAD",
+      "semantic_tags": ["station", "equipment_port"]
+    },
+    {
+      "id": "ST-DROPOFF",
+      "attachment_node_id": "N-DROPOFF",
+      "operation_type": "UNLOAD",
+      "semantic_tags": ["station", "equipment_port"]
+    }
+  ]
+}
