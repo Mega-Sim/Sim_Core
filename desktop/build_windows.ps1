@@ -36,6 +36,10 @@ $env:QT_QPA_PLATFORM = "offscreen"
 if ($LASTEXITCODE -ne 0) {
     throw "Native desktop smoke test failed."
 }
+& $Python desktop\graph_ui_smoke_test.py
+if ($LASTEXITCODE -ne 0) {
+    throw "Graph UI enhancement smoke test failed."
+}
 
 $PyInstallerArgs = @(
     "--noconfirm",
@@ -46,7 +50,7 @@ $PyInstallerArgs = @(
     "--add-binary", "$CoreBinary;.",
     "--add-data", "$SampleDir;examples\cross_domain",
     "--collect-all", "ezdxf",
-    "desktop\app.py"
+    "desktop\app_wrapper.py"
 )
 
 & $Python -m PyInstaller @PyInstallerArgs
