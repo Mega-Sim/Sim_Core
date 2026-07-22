@@ -1,0 +1,15 @@
+ClearCase CopyAreaDB|4
+09FR5520035_LA3_proj\SemiLA_2\resource
+2
+b
+10:FAB_Logic_pm.txt|1|12c94dd0d2c|11e2|fa2e53be|7ed41e5df980412294d1a802a5ea872d|0
+18:FAB_PathMover_Header.txt|1|12c521017c0|2bd|9b0de9ed|aa407134700e49d88cbfed62f61ed8af|0
+19:FAB_PathMover_Segment.txt|1|12c521017cc|513|20ab8273|83b0739bd7b34a46959ffc0299dfd86c|0
+16:TP_Conveyor_Header.txt|1|12d92c236f1|173|e2b379b6|bf50d1fc9d01437391808791c25814bf|0
+10:ColorPallete.txt|1|12c5210185d|8d4|e3085588|7e2526ae57104593beef403b9cf081c1|0
+f:FAB_Procdef.txt|1|12c521017a4|2fc|d8abe827|1a7306063f824b93bbe435066f971e8c|0
+18:FAB_PowerFree_Header.txt|1|12d92c23691|7d4|1e0fa2c1|fbd89c9c7349427784af0504e15da2a7|0
+10:FAB_Logic_pf.txt|1|12c94dd0cdc|11e2|ca9753b8|e29c5806a3154de2a38c7e639805cb6e|0
+e:FAB_Header.txt|1|12c521017b3|13b|e5176285|0c85a41c57fe4484bd7ee6ac53bdb01b|0
+19:FAB_PowerFree_Segment.txt|1|12c7bd21439|1f7|3f7897b5|e3121ff7cb8d4c42996963fb36fc3d4e|0
+19:FAB_PathMover_Graphic.txt|1|12c521017db|b4f0|98783a96|8fb6149928a1471795cee12525a42d9a|0

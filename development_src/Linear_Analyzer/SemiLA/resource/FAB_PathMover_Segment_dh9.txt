@@ -1,0 +1,49 @@
+AGVVEHSEG name DefSegment cap 1 pickup 12.96 Seconds setdown 12.96 Seconds
+	figcurspeed 100
+	figmaxspeed 100
+	 display picpos begx 2439 begy -368119.008 endx 2439 endy -368120.008 scx 945 scy 465 scz 600
+
+	template Millimeters
+700 0
+1
+310 0
+1 1 1 1 1 0 0
+end
+	fconn length 20 Millimeters noscale 20000
+	rconn length 20 Millimeters noscale 20000
+	PAP ind 0 
+		trx 300000 try 0 trz 0
+	PAP ind 1 
+		trx -300000 try 0 trz 0
+AGVSVEH type DefVehicle numveh 1000
+	vehsegs item DefSegment 
+	start NAME_ALL
+	Stacking OTT_LDDISP	
+	 picpos endx 1
+
+	load Default 
+		accel	0 0.8889 Meters Seconds Seconds
+		decel	0 0.8889 Meters Seconds Seconds
+		vel	0 2.6667 Meters Seconds
+		crvvel	0 0.8 Meters Seconds
+		sprvel	0 2.6667 Meters Seconds
+		rvel	0 2.6667 Meters Seconds
+		rcrvvel	0 0.8 Meters Seconds
+		rsprvel	0 2.6667 Meters Seconds
+		crabvel	0 2.6667 Meters Seconds
+		rotate	0 1 Seconds
+		brakedist	0 3.0 Meters
+		stopdist	0 0.6 Meters
+	load Empty 
+		accel	1 0 Meters Seconds Seconds
+		decel	1 0 Meters Seconds Seconds
+		vel	1 0 Meters Seconds
+		crvvel	1 0 Meters Seconds
+		sprvel	1 0 Meters Seconds
+		rvel	1 0 Meters Seconds
+		rcrvvel	1 0 Meters Seconds
+		rsprvel	1 0 Meters Seconds
+		crabvel	1 0 Meters Seconds
+		rotate	1 0 Seconds
+		brakedist	1 0 Meters
+		stopdist	1 0 Meters

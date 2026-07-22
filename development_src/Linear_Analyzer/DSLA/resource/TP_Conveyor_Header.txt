@@ -1,0 +1,17 @@
+SYSTYPE Conveyor
+UNITS Millimeters Seconds
+SYSDEF limit Infinite timeout 60 Seconds confname Config1
+FLAGS
+	System NoColor
+	Text NoColor
+	Sections NoColor
+	Section Names NoColor
+	Direction NoColor
+	Fixed Interval NoColor
+	Loads NoColor
+	Stations NoColor
+	Station Names NoColor
+	Transfers NoColor
+	Photoeyes NoColor
+	Photoeye Names NoColor
+CONVDEF UserId 7

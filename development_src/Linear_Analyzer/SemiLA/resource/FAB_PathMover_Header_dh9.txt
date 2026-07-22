@@ -1,0 +1,24 @@
+  VERSION 12.6.1.12	 
+  SYSTYPE AGVS  
+  UNITS Millimeters Seconds	 
+  SYSDEF timeout 60 Seconds confname Config1	 
+  FLAGS
+   System Inherit 
+   Text Invisible Inherit 
+   Paths Inherit 
+   Path Names Invisible Inherit 
+   Direction Inherit SCALE 0.2
+   Vehicles Inherit 
+   Path Attach Points Invisible Inherit 
+   Control Points Inherit SCALE 0.2 
+   Control Point Names Invisible Inherit 
+   Transfers Inherit SCALE 0.1 
+  AGVSDEF secname path1 name cp1 UserId 2 
+   NEXTPATH name path1 type DefaultGuidePath 
+   NEXTCP name cp1 type DefaultControlPoint 
+   ALTERNATE NONE ResumeSpeedWhenClaimed 
+   vel 0 Infinite Meters Seconds 
+   crabvel 0 Infinite Meters Seconds 
+   sprvel 0 Infinite Meters Seconds 
+   crvvel 0 Infinite Meters Seconds 
+  AGVSTOL minang 150 maxang 1800 

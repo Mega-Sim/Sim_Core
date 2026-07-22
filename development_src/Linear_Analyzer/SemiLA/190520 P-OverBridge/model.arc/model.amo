@@ -1,0 +1,8 @@
+VERSION 12.6.1.12
+UNITS Millimeters Seconds
+RNSET 1
+DRAWPOS minx -113814.392 maxx 117800.08 miny -368591.52 maxy 166140.96 minz 0 maxz 600 trx 0 try 0
+MOVESYS name pm
+	SYSPOS endx 1
+PROCSYS name model~
+	SYSPOS endx 1

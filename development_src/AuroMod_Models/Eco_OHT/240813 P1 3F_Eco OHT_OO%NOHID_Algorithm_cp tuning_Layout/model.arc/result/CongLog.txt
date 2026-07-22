@@ -1,0 +1,1 @@
+     theVehicle	    Delayed Node	theVehicle A_cgStopOccur	  Stop Duration

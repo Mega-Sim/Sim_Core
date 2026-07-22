@@ -1,0 +1,21 @@
+SYSTYPE AGVS
+UNITS Millimeters Seconds
+SYSDEF limit Infinite timeout 60 Seconds confname Config1
+FLAGS
+	System NoColor
+	Text Invisible NoColor
+	Paths NoColor
+	Path Names Invisible NoColor
+	Direction Invisible NoColor
+	Vehicles NoColor
+	Path Attach Points Invisible NoColor
+	Control Points Invisible NoColor
+	Control Point Names Invisible NoColor
+	Transfers Invisible NoColor
+AGVSDEF secname path1 name cp1 UserId 2 cpcap Infinite cprel distance 0 Feet align origin attach rigid
+	ALTERNATE NONE ResumeSpeedWhenClaimed
+	vel 0 Infinite Meters Seconds
+	crabvel 0 Infinite Meters Seconds
+	sprvel 0 Infinite Meters Seconds
+	crvvel 0 Infinite Meters Seconds
+AGVSTOL minang 150 maxang 1800

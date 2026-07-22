@@ -1,0 +1,34 @@
+SYSTYPE Power&Free
+UNITS Millimeters Seconds
+SYSDEF limit Infinite timeout 60 Seconds confname Config1
+FLAGS
+	System NoColor
+	Text NoColor
+	Chains NoColor
+	Chain Names NoColor
+	Direction NoColor
+	Fixed Interval NoColor
+	Carriers NoColor
+	Path Attach Points NoColor
+	Stations NoColor
+	Station Names NoColor
+	Transfers NoColor
+	Photoeyes NoColor
+	Photoeye Names NoColor
+	
+CONVDEF UserId 0
+	NEXTSEC name chain0 type DefaultSection
+	NEXTSTA name sta0 type DefaultStation
+	NEXTTRAN name tran0 type DefaultTransfer
+	NEXTMOTOR name motor1 type DefaultMotor
+	NEXTPHOTOEYE name photoeye1 type DefaultPhotoeye
+	ALTERNATE NONE EXTRASECTIONWIDTH 3 Feet
+	
+CONVTOL minang 200 maxang 1800
+CONVMOTORTYPE name DefaultMotor
+CONVMOTOR name M_chain1 type DefaultMotor
+CONVSECTIONTYPE name DefaultSection width 0 Meters motor M_chain1 vel dVel Meters Seconds acc dAccel Meters Seconds Seconds dec dAccel Meters Seconds Seconds accum load stopsize 3 0 Meters movesize 3 0 Meters inductsize 3 0 Meters fixed 1 0 Meters align leadingpap attach rigid nav 1
+CONVSECTIONTYPE name ShortPathSection width 0 Meters motor M_chain1 vel dVel Meters Seconds acc dAccel Meters Seconds Seconds dec dAccel Meters Seconds Seconds accum load stopsize 3 0 Meters movesize 3 0 Meters inductsize 3 0 Meters fixed 1 0 Meters align leadingpap attach rigid nav 1
+CONVSECTIONTYPE name ShortLINESection width 0 Meters motor M_chain1 vel dVel Meters Seconds acc dAccel Meters Seconds Seconds dec dAccel Meters Seconds Seconds accum load stopsize 3 0 Meters movesize 3 0 Meters inductsize 3 0 Meters fixed 1 0 Meters align leadingpap attach rigid nav 1
+CONVSECTIONTYPE name NPathSection width 0 Meters motor M_chain1 vel dVel Meters Seconds acc dAccel Meters Seconds Seconds dec dAccel Meters Seconds Seconds accum load stopsize 3 0 Meters movesize 3 0 Meters inductsize 3 0 Meters fixed 1 0 Meters align leadingpap attach rigid nav 1
+CONVPHOTOEYETYPE name DefaultPhotoeye blocktimeout 5 Seconds cleartimeout 5 Seconds
