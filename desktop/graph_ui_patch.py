@@ -7,14 +7,41 @@ from typing import Any, Dict, Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont, QPainterPath, QPen
-from PySide6.QtWidgets import QGraphicsEllipseItem, QGraphicsPathItem, QGraphicsSimpleTextItem, QGraphicsView
+from PySide6.QtWidgets import (
+    QGraphicsEllipseItem,
+    QGraphicsItem,
+    QGraphicsPathItem,
+    QGraphicsSimpleTextItem,
+    QGraphicsView,
+)
+
+EDGE_COLOR = QColor("#315568")
+EDGE_SELECTED_COLOR = QColor("#ffd54f")
 
 
-def install_shift_left_pan(view_class: type[QGraphicsView]) -> None:
-    """Enable Shift+Left drag panning even when fitInView leaves no scroll range."""
+def install_graph_interaction(view_class: type[QGraphicsView]) -> None:
+    """Enable Shift+Left panning, rubber-band edge selection and clear-on-Esc/background click."""
+    original_init = view_class.__init__
     original_press = view_class.mousePressEvent
     original_move = view_class.mouseMoveEvent
     original_release = view_class.mouseReleaseEvent
+    original_key = view_class.keyPressEvent
+
+    def update_edge_colors(self) -> None:
+        for item in self.scene().items():
+            if isinstance(item, QGraphicsPathItem) and item.data(0) == "graph-edge":
+                pen = item.pen()
+                pen.setColor(EDGE_SELECTED_COLOR if item.isSelected() else EDGE_COLOR)
+                item.setPen(pen)
+
+    def clear_edge_selection(self) -> None:
+        self.scene().clearSelection()
+        update_edge_colors(self)
+
+    def init(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        original_init(self, *args, **kwargs)
+        self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
+        self.scene().selectionChanged.connect(lambda: update_edge_colors(self))
 
     def mouse_press(self, event):  # type: ignore[no-untyped-def]
         if event.button() == Qt.MouseButton.LeftButton and bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
@@ -23,6 +50,8 @@ def install_shift_left_pan(view_class: type[QGraphicsView]) -> None:
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
             event.accept()
             return
+        if event.button() == Qt.MouseButton.LeftButton and not self.itemAt(event.position().toPoint()):
+            clear_edge_selection(self)
         original_press(self, event)
 
     def mouse_move(self, event):  # type: ignore[no-untyped-def]
@@ -45,9 +74,18 @@ def install_shift_left_pan(view_class: type[QGraphicsView]) -> None:
             return
         original_release(self, event)
 
+    def key_press(self, event):  # type: ignore[no-untyped-def]
+        if event.key() == Qt.Key.Key_Escape:
+            clear_edge_selection(self)
+            event.accept()
+            return
+        original_key(self, event)
+
+    view_class.__init__ = init
     view_class.mousePressEvent = mouse_press
     view_class.mouseMoveEvent = mouse_move
     view_class.mouseReleaseEvent = mouse_release
+    view_class.keyPressEvent = key_press
 
 
 def _is_curved_chain(node_path: list[int], nodes: list[list[float]], threshold_degrees: float = 2.0) -> bool:
@@ -133,8 +171,6 @@ def consolidate_curve_edges(graph: Dict[str, Any]) -> Dict[str, Any]:
         return graph
 
     merged_edges = [replacement.get(edge_id, edge) for edge_id, edge in enumerate(edges) if edge_id not in removed]
-
-    # Compact topology nodes while preserving intermediate curve coordinates only in geometry.
     used_nodes: set[int] = set()
     for edge in merged_edges:
         used_nodes.update((int(edge["start"]), int(edge["end"])))
@@ -201,48 +237,65 @@ def install_dark_graph_renderer(view_class: type[QGraphicsView]) -> None:
                 for raw in geometry[1:]:
                     path.lineTo(*raw_point(raw))
             else:
-                path.moveTo(*point(start_node)); path.lineTo(*point(end_node))
+                path.moveTo(*point(start_node))
+                path.lineTo(*point(end_node))
+
             rail = QGraphicsPathItem(path)
-            rail.setPen(QPen(QColor("#315568"), 2.6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+            rail.setPen(QPen(EDGE_COLOR, 2.6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+            rail.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
+            rail.setData(0, "graph-edge")
             rail.setZValue(1)
             scene.addItem(rail)
 
             if directed:
-                source_x, source_y = point(int(source_id)); target_x, target_y = point(int(target_id))
+                source_x, source_y = point(int(source_id))
+                target_x, target_y = point(int(target_id))
                 dx, dy = target_x - source_x, target_y - source_y
                 magnitude = math.hypot(dx, dy)
                 if magnitude > 0.1:
                     ux, uy = dx / magnitude, dy / magnitude
                     marker_x, marker_y = source_x + dx * 0.62, source_y + dy * 0.62
-                    arrow_size = min(10.0, max(5.5, magnitude * 0.30)); wing = arrow_size * 0.62
+                    arrow_size = min(10.0, max(5.5, magnitude * 0.30))
+                    wing = arrow_size * 0.62
                     base_x, base_y = marker_x - ux * arrow_size, marker_y - uy * arrow_size
-                    arrow = QPainterPath(); arrow.moveTo(marker_x, marker_y)
-                    arrow.lineTo(base_x - uy * wing, base_y + ux * wing); arrow.moveTo(marker_x, marker_y)
+                    arrow = QPainterPath()
+                    arrow.moveTo(marker_x, marker_y)
+                    arrow.lineTo(base_x - uy * wing, base_y + ux * wing)
+                    arrow.moveTo(marker_x, marker_y)
                     arrow.lineTo(base_x + uy * wing, base_y - ux * wing)
                     arrow_item = QGraphicsPathItem(arrow)
                     arrow_item.setPen(QPen(QColor("#43e4d3"), 2.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
-                    arrow_item.setZValue(3); scene.addItem(arrow_item)
+                    arrow_item.setZValue(3)
+                    scene.addItem(arrow_item)
 
             rail.setToolTip(f"Edge {edge_id}\n{start_node} - {end_node}\n{source_id} -> {target_id}" if directed else f"Edge {edge_id}\n방향 미결정")
 
         for label in graph.get("metadata", {}).get("labels", []):
             try:
-                x = (float(label["x"]) - min_x) * scale; y = (float(label["y"]) - min_y) * scale
+                x = (float(label["x"]) - min_x) * scale
+                y = (float(label["y"]) - min_y) * scale
             except (KeyError, TypeError, ValueError):
                 continue
             text = QGraphicsSimpleTextItem(str(label.get("text", "")))
-            text.setBrush(QColor("#a9c0cb")); text.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold)); text.setPos(x - 35, y - 18); text.setZValue(4)
+            text.setBrush(QColor("#a9c0cb"))
+            text.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
+            text.setPos(x - 35, y - 18)
+            text.setZValue(4)
             scene.addItem(text)
 
         node_radius = 3.5 if len(raw_nodes) < 2000 else 2.1
         for node_id in range(len(raw_nodes)):
             x, y = point(node_id)
             dot = QGraphicsEllipseItem(x - node_radius, y - node_radius, node_radius * 2, node_radius * 2)
-            dot.setBrush(QColor("#0b1b27")); dot.setPen(QPen(QColor("#719bad"), 1)); dot.setZValue(2)
+            dot.setBrush(QColor("#0b1b27"))
+            dot.setPen(QPen(QColor("#719bad"), 1))
+            dot.setZValue(2)
             dot.setToolTip(f"Node {node_id}\n({raw_nodes[node_id][0]}, {raw_nodes[node_id][1]})")
             scene.addItem(dot)
 
         bounds = scene.itemsBoundingRect().adjusted(-35, -35, 35, 35)
-        scene.setSceneRect(bounds); self.resetTransform(); self.fitInView(bounds, Qt.AspectRatioMode.KeepAspectRatio)
+        scene.setSceneRect(bounds)
+        self.resetTransform()
+        self.fitInView(bounds, Qt.AspectRatioMode.KeepAspectRatio)
 
     view_class.set_graph = set_graph
