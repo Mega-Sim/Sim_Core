@@ -25,10 +25,23 @@ if ($LASTEXITCODE -ne 0) {
 if ($LASTEXITCODE -ne 0) {
     throw "Random From-To static analysis tests failed."
 }
+& $Python desktop\test_random_flow_animation.py
+if ($LASTEXITCODE -ne 0) {
+    throw "Random From-To vehicle centerline animation tests failed."
+}
 
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+if ($LASTEXITCODE -ne 0) {
+    throw "CMake configure failed."
+}
 cmake --build build --config Release --parallel
+if ($LASTEXITCODE -ne 0) {
+    throw "Native Release build failed."
+}
 ctest --test-dir build -C Release --output-on-failure
+if ($LASTEXITCODE -ne 0) {
+    throw "Native CTest suite failed."
+}
 
 if (-not (Test-Path $CoreBinary)) {
     throw "Core binary not found: $CoreBinary"
@@ -50,7 +63,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 & $Python desktop\random_flow_ui_smoke_test.py
 if ($LASTEXITCODE -ne 0) {
-    throw "Random From-To heatmap UI smoke test failed."
+    throw "Random From-To heatmap and vehicle animation UI smoke test failed."
 }
 
 $PyInstallerArgs = @(
@@ -66,6 +79,9 @@ $PyInstallerArgs = @(
 )
 
 & $Python -m PyInstaller @PyInstallerArgs
+if ($LASTEXITCODE -ne 0) {
+    throw "PyInstaller packaging failed."
+}
 
 Write-Host ""
 Write-Host "Build complete:" -ForegroundColor Green
