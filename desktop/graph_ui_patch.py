@@ -18,6 +18,8 @@ EDGE_COLOR = QColor("#315568")
 EDGE_SELECTED_COLOR = QColor("#ffd54f")
 INTERACTIVE_EDGE_LIMIT = 2_500
 INTERACTIVE_NODE_LIMIT = 4_000
+STATION_LABEL_SCALE = 0.1
+ARROW_SCALE = 0.2
 
 
 class _GraphLabelsItem(QGraphicsItem):
@@ -41,10 +43,13 @@ class _GraphLabelsItem(QGraphicsItem):
             return
         exposed = option.exposedRect.adjusted(-80.0, -30.0, 80.0, 30.0)
         painter.setPen(QColor("#a9c0cb"))
-        painter.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
+        painter.setFont(QFont("Segoe UI", max(1, round(10 * STATION_LABEL_SCALE)), QFont.Weight.DemiBold))
         for x, y, label in self._labels:
             if exposed.contains(QPointF(x, y)):
-                painter.drawText(QPointF(x - 35.0, y - 4.0), label)
+                painter.drawText(
+                    QPointF(x - 35.0 * STATION_LABEL_SCALE, y - 4.0 * STATION_LABEL_SCALE),
+                    label,
+                )
 
 
 def _distance_to_segment(
@@ -400,7 +405,7 @@ def install_dark_graph_renderer(view_class: type[QGraphicsView]) -> None:
                             uy = (second[1] - first[1]) / segment_length
                             break
                         travelled += segment_length
-                    arrow_size = min(6.0, max(2.5, total_length * 0.22))
+                    arrow_size = min(6.0, max(2.5, total_length * 0.22)) * ARROW_SCALE
                     wing = arrow_size * 0.62
                     base_x, base_y = marker_x - ux * arrow_size, marker_y - uy * arrow_size
                     all_arrows.moveTo(marker_x, marker_y)
@@ -428,7 +433,7 @@ def install_dark_graph_renderer(view_class: type[QGraphicsView]) -> None:
             arrow_batch.setPen(
                 QPen(
                     QColor("#43e4d3"),
-                    1.45,
+                    1.45 * ARROW_SCALE,
                     Qt.PenStyle.SolidLine,
                     Qt.PenCapStyle.RoundCap,
                     Qt.PenJoinStyle.RoundJoin,
