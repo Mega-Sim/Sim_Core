@@ -1,9 +1,10 @@
-"""Sim_Core desktop entry point with graph interaction and Layout analysis enhancements."""
+"""Sim_Core desktop entry point with graph, Layout and AutoMod enhancements."""
 from __future__ import annotations
 
 import sys
 
 import app_base as base
+from automod_modeling_patch import install_automod_modeling
 from graph_enhancer_compat import install_compatible_enhancements
 from graph_render_optimization import install_fast_graph_renderer
 from graph_ui_patch import install_dark_graph_renderer, install_graph_interaction
@@ -18,10 +19,11 @@ install_dark_graph_renderer(base.NetworkView)
 install_fast_graph_renderer(base.NetworkView)
 install_bidirectional_pan(base.NetworkView)
 
-# Restore .rail support on top of the Layout static-analysis app_base, then add
-# Random/Actual FromTo mode selection without touching the source CSV.
+# Layer optional feature patches on the current workbench without replacing
+# app_base: Rail/DXF support, Layout static analysis, then AutoMod export.
 install_rail_compat(base)
 install_layout_static_analysis(base)
+install_automod_modeling(base)
 
 MainWindow = base.MainWindow
 NetworkView = base.NetworkView
