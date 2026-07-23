@@ -7,6 +7,7 @@ import app_base as base
 from curve_edge_fix import consolidate_arc_edges
 from graph_enhancer_compat import install_compatible_enhancements
 from graph_ui_patch import install_dark_graph_renderer, install_graph_interaction
+from layout_static_analysis_patch import install_layout_static_analysis
 from pan_fix import install_bidirectional_pan
 
 
@@ -32,6 +33,11 @@ install_graph_interaction(base.NetworkView)
 install_dark_graph_renderer(base.NetworkView)
 install_bidirectional_pan(base.NetworkView)
 base.convert_dxf_to_graph = _convert_dxf_to_graph_with_curve_merge
+
+# Keep the existing Random FromTo analysis intact and add a selectable real
+# FromTo CSV path for Layout static analysis.  The real CSV is treated as
+# read-only and only timestamped analysis snapshots are written.
+install_layout_static_analysis(base)
 
 MainWindow = base.MainWindow
 NetworkView = base.NetworkView
