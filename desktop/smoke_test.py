@@ -41,6 +41,10 @@ def main() -> int:
         statistics = window.cad_graph["metadata"]["statistics"]
         if statistics["node_count"] != 3 or statistics["edge_count"] != 2:
             raise RuntimeError("DXF graph counts did not match the UI fixture")
+        if window.cad_automod_button.text() != "AutoMod 모델변환":
+            raise RuntimeError("AutoMod conversion button was not added next to Graph JSON save")
+        if not window.cad_automod_button.isEnabled():
+            raise RuntimeError("AutoMod conversion button was not enabled after DXF conversion")
         geometry_types = [edge.get("geometry_type", "LINE") for edge in window.cad_graph["edges"]]
         if geometry_types.count("LINE") != 1 or geometry_types.count("ARC") != 1:
             raise RuntimeError("DXF graph did not preserve one LINE and one merged ARC")
