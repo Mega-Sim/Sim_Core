@@ -4,6 +4,7 @@ from __future__ import annotations
 import sys
 
 import app_base as base
+from applied_share_finalizer import install_applied_share_finalizer
 from automod_modeling_patch import install_automod_modeling
 from english_ui_patch import install_applied_english_ui
 from graph_enhancer_compat import install_compatible_enhancements
@@ -40,6 +41,7 @@ install_input_ui_compact(base)
 # Applied Materials sharing branch: translate the complete presentation layer
 # after all feature/UI patches have been installed.
 install_applied_english_ui(base)
+install_applied_share_finalizer(base)
 
 
 def main() -> int:
