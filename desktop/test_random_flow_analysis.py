@@ -200,17 +200,20 @@ class RandomFlowAnalysisTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             first = save_random_workload(
                 workload,
+                self.facility,
                 temporary,
                 model_name="cross-domain-loop",
                 timestamp="20260723-010203",
             )
             second = save_random_workload(
                 workload,
+                self.facility,
                 temporary,
                 model_name="cross-domain-loop",
                 timestamp="20260723-010203",
             )
             self.assertNotEqual(first.directory, second.directory)
+            self.assertTrue(first.facility_json_path.is_file())
             self.assertTrue(first.scenario_json_path.is_file())
             self.assertTrue(first.analysis_json_path.is_file())
             with first.demand_csv_path.open(encoding="utf-8", newline="") as stream:
@@ -223,6 +226,13 @@ class RandomFlowAnalysisTests(unittest.TestCase):
                 first.scenario_json_path.read_text(encoding="utf-8")
             )
             self.assertEqual(loaded_scenario, workload.scenario)
+            loaded_facility = json.loads(
+                first.facility_json_path.read_text(encoding="utf-8")
+            )
+            self.assertEqual(loaded_facility, self.facility)
+            self.assertEqual(
+                loaded_facility["revision_id"], loaded_scenario["model_revision_id"]
+            )
             saved_analysis = json.loads(
                 first.analysis_json_path.read_text(encoding="utf-8")
             )

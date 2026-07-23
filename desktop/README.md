@@ -57,26 +57,29 @@ dist\Sim_Core_Flow_Workbench.exe
 | Facility Station 기반 랜덤 From-To/Scenario 생성 | 네이티브 구현 |
 | 방향성 Dijkstra Edge 통행량 Heatmap 팝업 | 네이티브 구현 |
 | DXF → 방향성 Graph JSON | 실제 변환·화면 미리보기·저장 연결 |
+| 현재 DXF Graph → Random LA Facility 연결 | `station-*`/`ST-*` 라벨 투영·Rail 분할 구현 |
 | Graph 전용 확대 팝업 | 네이티브 구현 |
 | Edge 클릭·드래그 블록 선택 | 네이티브 구현 |
 | 선택 Edge 방향 반전 | Graph JSON에 반영 |
 | Bottleneck/ROI/Policy A-B/Digital Twin | 프로토타입 계약, Core 미연결 |
 
-실행 결과는 `%USERPROFILE%\Documents\Sim_Core\Runs` 아래에 실행별로 저장됩니다. 랜덤 From-To 생성 결과는 `%USERPROFILE%\Documents\Sim_Core\Generated` 아래의 새 폴더에 CSV, Scenario JSON, LA 분석 JSON으로 함께 저장되며 기존 결과를 덮어쓰지 않습니다.
+실행 결과는 `%USERPROFILE%\Documents\Sim_Core\Runs` 아래에 실행별로 저장됩니다. 랜덤 From-To 생성 결과는 `%USERPROFILE%\Documents\Sim_Core\Generated` 아래의 새 폴더에 분석에 실제 사용한 Facility JSON, CSV, Scenario JSON, LA 분석 JSON으로 함께 저장되며 기존 결과를 덮어쓰지 않습니다.
 
 Windows 패키징 과정에서는 DXF 변환, 랜덤 From-To, C++ Core, 기본 Workbench, Graph UI 및 Heatmap 팝업 시험을 모두 실행합니다.
 
 ## 레이아웃만으로 랜덤 반송 분석·시뮬레이션하기
 
-1. 왼쪽에서 `입력 · CAD`를 열고 Node, 방향성 Edge, Station이 포함된 `Facility JSON`을 선택합니다.
+1. 왼쪽에서 `입력 · CAD`를 열고 다음 중 하나를 현재 분석 레이아웃으로 선택합니다.
+   - Node, 방향성 Edge, Station이 포함된 `Facility JSON`
+   - Rail LINE·ARC와 `station-*` 또는 `ST-*` TEXT/MTEXT 라벨이 2개 이상 포함된 DXF
 2. `시간당 총 반송수`를 입력합니다. 예를 들어 `1,000`이면 1시간 동안 1,000건의 Job을 생성합니다(최대 10,000건).
 3. 필요하면 재현용 `Random Seed`를 바꿉니다. 같은 Facility·반송수·Seed는 항상 같은 From-To를 만듭니다.
 4. `랜덤 From-To 생성 · 정적분석`을 누릅니다.
 5. 방향성으로 도달 가능한 서로 다른 Station 쌍에서 활성 OD를 무작위 선택하고, 총 반송수를 그 OD들에 무작위 배분합니다. 중복 From-To는 CSV에서 하나의 OD 수요로 합산합니다.
 6. 팝업에서 모든 Edge를 확인합니다. 통행량이 낮거나 0인 Edge는 초록색, 최대 통행량 Edge는 빨간색이며 중간 부하는 노란색을 거칩니다.
-7. 생성된 Scenario와 From-To CSV는 화면 입력에 자동 연결됩니다. 이후 `시뮬레이션`에서 그대로 실행하거나 `Flow 분석`에서 Core 결과를 다시 확인할 수 있습니다.
+7. 분석에 실제 사용된 Facility와 생성된 Scenario·From-To CSV는 화면 입력에 한 묶음으로 자동 연결됩니다. 이후 `시뮬레이션`에서 그대로 실행하거나 `Flow 분석`에서 Core 결과를 다시 확인할 수 있습니다.
 
-최단경로는 Core와 동일하게 Edge 자유주행시간을 비용으로 사용하는 방향성 Dijkstra로 계산하며, 비용이 같은 경로는 Edge ID 순서로 결정론적으로 선택합니다. 방향 때문에 어떤 다른 Station에도 갈 수 없는 Station은 랜덤 후보에서 제외하고 화면에 제외 개수를 표시합니다. DXF Graph에는 Station ID와 연결 Node 계약이 없으므로 이 기능은 Canonical Facility JSON을 기준으로 동작합니다.
+최단경로는 Core와 동일하게 Edge 자유주행시간을 비용으로 사용하는 방향성 Dijkstra로 계산하며, 비용이 같은 경로는 Edge ID 순서로 결정론적으로 선택합니다. 방향 때문에 어떤 다른 Station에도 갈 수 없는 Station은 랜덤 후보에서 제외하고 화면에 제외 개수를 표시합니다. DXF를 선택하면 앱은 현재 화면의 방향 수정까지 포함한 Graph를 사용하고, Station 라벨을 가장 가까운 Rail 중앙선에 투영한 뒤 그 위치에서 Edge를 분할해 Canonical Facility 입력을 만듭니다. DXF 변환 또는 Station 연결에 실패해도 시작 시 자동 로드된 샘플 Facility로 몰래 대체하지 않습니다.
 
 자동 생성 Scenario는 임의의 Fleet 규모가 분석 결과를 바꾸지 않도록 Job마다 From Station에 대기 중인 합성 Vehicle 1대를 배치합니다. 따라서 이 Scenario는 레이아웃 방향·경로와 Core 실행 가능성을 확인하기 위한 것이며, 필요한 실제 OHT 대수나 Dispatch 성능을 산정하는 Fleet-sizing 결과로 사용하면 안 됩니다. Job은 첫 1시간에 투입되고, 마지막 Job이 이동·Load·Unload를 끝낼 수 있는 최소 정리시간을 Scenario 종료시간에 자동으로 더합니다.
 
@@ -89,11 +92,12 @@ Windows 패키징 과정에서는 DXF 변환, 랜덤 From-To, C++ Core, 기본 W
 1. 왼쪽에서 `입력 · CAD`를 엽니다.
 2. `CAD 원본`의 `파일 선택`에서 `.dxf` 파일을 고릅니다.
 3. 선택과 동시에 LINE·ARC geometry를 Node와 방향성 Edge로 변환해 아래 화면에 표시합니다.
-4. 필요하면 Rail Layer, ARC 분할 수, 좌표 반올림 값을 바꾸고 `DXF 다시 변환`을 누릅니다.
-5. 메인 캔버스에서 Edge를 클릭하거나 빈 영역에서 마우스를 드래그해 여러 Edge를 블록으로 선택합니다.
-6. `선택 방향 반전`을 누르면 선택된 방향성 Edge의 `dir` 값이 반대로 변경됩니다.
-7. 넓게 보고 싶으면 `그래프만 크게 보기`를 눌러 Graph 전용 팝업을 엽니다. 팝업에서도 선택과 방향 반전이 가능합니다.
-8. `Graph JSON 저장`으로 `<원본명>.graph.json`을 저장하면 수동 방향 수정 내용까지 저장됩니다.
+4. Random LA를 사용할 도면에는 `station-1`, `station-2`처럼 `station-*` 또는 `ST-*` TEXT/MTEXT 라벨을 Rail 위치에 2개 이상 둡니다. 변환 상태에 연결된 Station 수가 표시됩니다.
+5. 필요하면 Rail Layer, ARC 분할 수, 좌표 반올림 값을 바꾸고 `DXF 다시 변환`을 누릅니다.
+6. 메인 캔버스에서 Edge를 클릭하거나 빈 영역에서 마우스를 드래그해 여러 Edge를 블록으로 선택합니다.
+7. `선택 방향 반전`을 누르면 선택된 방향성 Edge의 `dir` 값이 반대로 변경되고 다음 Random LA에도 즉시 반영됩니다.
+8. 넓게 보고 싶으면 `그래프만 크게 보기`를 눌러 Graph 전용 팝업을 엽니다. 팝업에서도 선택과 방향 반전이 가능합니다.
+9. `Graph JSON 저장`으로 `<원본명>.graph.json`을 저장하면 수동 방향 수정 내용까지 저장됩니다.
 
 Rail Layer를 비워 두면 모든 LINE·ARC Layer를 읽습니다. 여러 Layer는 쉼표 또는 세미콜론으로 구분합니다. 기존 파일 카드의 장식용 Badge/Icon 영역은 Graph 화면 공간 확보를 위해 축소되며, Graph 캔버스의 최소 높이를 확장합니다.
 
@@ -114,5 +118,6 @@ py desktop\dxf_graph_converter.py layout.dxf `
 
 ```powershell
 py desktop\test_dxf_graph_converter.py
+py desktop\test_cad_graph_facility.py
 py desktop\test_random_flow_analysis.py
 ```

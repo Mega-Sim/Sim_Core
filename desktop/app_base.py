@@ -53,6 +53,10 @@ from dxf_graph_converter import (
     convert_dxf_to_graph,
     save_graph as write_graph_json,
 )
+from cad_graph_facility import (
+    CadGraphFacilityError,
+    build_facility_from_cad_graph,
+)
 from random_flow_analysis import default_generated_output_root
 from random_flow_ui import RandomWorkloadWorker, show_random_flow_dialog
 
@@ -166,6 +170,16 @@ def styled_label(text: str, object_name: str) -> QLabel:
     label = QLabel(text)
     label.setObjectName(object_name)
     return label
+
+
+def uses_dxf_screen_coordinates(facility: Dict[str, Any]) -> bool:
+    """DXF preview keeps model-space Y in the same on-screen direction as Graph."""
+
+    return any(
+        isinstance(artifact, dict)
+        and str(artifact.get("kind", "")).casefold() == "dxf"
+        for artifact in facility.get("source_artifacts", [])
+    )
 
 
 class MetricCard(QFrame):
@@ -314,8 +328,13 @@ class NetworkView(QGraphicsView):
         min_y, max_y = min(ys), max(ys)
         scale = 900.0 / max(max_x - min_x, max_y - min_y, 1.0)
 
+        y_direction = 1.0 if uses_dxf_screen_coordinates(facility) else -1.0
+
         def point(raw: Dict[str, Any]) -> tuple[float, float]:
-            return ((float(raw.get("x", 0)) - min_x) * scale, -(float(raw.get("y", 0)) - min_y) * scale)
+            return (
+                (float(raw.get("x", 0)) - min_x) * scale,
+                y_direction * (float(raw.get("y", 0)) - min_y) * scale,
+            )
 
         flow = {item.get("edge_id"): item for item in (analysis or {}).get("edge_flows", [])}
         for edge in facility.get("edges", []):
@@ -541,6 +560,10 @@ class MainWindow(QMainWindow):
         self.scenario: Optional[Dict[str, Any]] = None
         self.analysis: Optional[Dict[str, Any]] = None
         self.cad_graph: Optional[Dict[str, Any]] = None
+        self.cad_facility: Optional[Dict[str, Any]] = None
+        self.cad_facility_error: Optional[str] = None
+        self._active_layout_kind = "facility"
+        self._random_flow_facility: Optional[Dict[str, Any]] = None
         self._random_flow_worker: Optional[RandomWorkloadWorker] = None
         self._random_flow_dialog = None
         self.last_manifest: Optional[Dict[str, Any]] = None
@@ -916,6 +939,7 @@ class MainWindow(QMainWindow):
         root = sample_root()
         if not root:
             return
+        self._active_layout_kind = "facility"
         self.facility_path = root / "facility.json"
         self.scenario_path = root / "scenario.json"
         candidate = root / "from_to.csv"
@@ -934,6 +958,7 @@ class MainWindow(QMainWindow):
         path = Path(value)
         try:
             if key == "facility":
+                self._active_layout_kind = "facility"
                 self.facility_path = path
                 self.facility = read_json(path)
                 self.analysis = None
@@ -943,6 +968,7 @@ class MainWindow(QMainWindow):
             elif key == "demand":
                 self.demand_path = path
             elif key == "cad":
+                self._active_layout_kind = "cad"
                 self.cad_path = path
                 self.cad_graph_path = None
                 self.convert_cad_graph()
@@ -951,13 +977,35 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "파일 오류", str(error))
 
     def refresh(self) -> None:
-        facility = self.facility or {}
-        self.metric_nodes.set_value(len(facility.get("nodes", [])))
-        self.metric_edges.set_value(len(facility.get("edges", [])))
+        using_cad = self._active_layout_kind == "cad"
+        facility = (self.cad_facility if using_cad else self.facility) or {}
+        graph = self.cad_graph or {}
+        self.metric_nodes.set_value(
+            len(facility.get("nodes", []))
+            if facility
+            else len(graph.get("nodes", [])) if using_cad else 0
+        )
+        self.metric_edges.set_value(
+            len(facility.get("edges", []))
+            if facility
+            else len(graph.get("edges", [])) if using_cad else 0
+        )
         self.metric_stations.set_value(len(facility.get("stations", [])))
         self.metric_demands.set_value(demand_count(self.demand_path, self.scenario))
         if hasattr(self, "random_flow_status") and self._random_flow_worker is None:
-            if facility:
+            if using_cad and facility:
+                self.random_flow_status.setText(
+                    f"분석 대상 · CAD {self.cad_path.name if self.cad_path else 'Graph'} · "
+                    f"Station {len(facility.get('stations', [])):,}개 · "
+                    f"Edge {len(facility.get('edges', [])):,}개"
+                )
+            elif using_cad:
+                self.random_flow_status.setText(
+                    "분석 대상 · 현재 CAD Graph · Random LA 연결 불가\n"
+                    f"{self.cad_facility_error or 'DXF Graph 변환 결과가 없습니다.'}\n"
+                    "자동 샘플 Facility는 사용하지 않습니다."
+                )
+            elif facility:
                 self.random_flow_status.setText(
                     f"분석 대상 · {facility.get('model_id', 'Facility')} · "
                     f"Station {len(facility.get('stations', [])):,}개"
@@ -966,7 +1014,10 @@ class MainWindow(QMainWindow):
                 self.random_flow_status.setText(
                     "Facility JSON을 연결하면 Station 기준 랜덤 수요를 생성할 수 있습니다."
                 )
-        self.network.set_model(self.facility, self.analysis)
+            self.random_flow_generate_button.setEnabled(
+                bool(facility and len(facility.get("stations", [])) >= 2)
+            )
+        self.network.set_model(facility or None, self.analysis)
         self.core_status.setText("●  Core 실행 가능" if self.core else "●  Core 미탑재")
         self.core_status.setProperty("ready", bool(self.core))
         self.core_status.style().unpolish(self.core_status)
@@ -982,20 +1033,75 @@ class MainWindow(QMainWindow):
         )
         self.render_analysis()
 
+    def _clear_random_flow_outputs(self) -> None:
+        """Discard Scenario/analysis that belongs to a previously active layout."""
+
+        if self._active_layout_kind == "cad":
+            self.facility_path = None
+            if hasattr(self, "file_cards"):
+                self.file_cards["facility"].set_path(None)
+        self.scenario = None
+        self.scenario_path = None
+        self.demand_path = None
+        self.analysis = None
+        if hasattr(self, "file_cards"):
+            self.file_cards["scenario"].set_path(None)
+            self.file_cards["demand"].set_path(None)
+
+    def _bind_current_cad_graph(self, *, clear_outputs: bool) -> None:
+        """Rebuild the Random-LA Facility from the editable CAD Graph."""
+
+        self._active_layout_kind = "cad"
+        self.cad_facility = None
+        self.cad_facility_error = None
+        if clear_outputs:
+            self._clear_random_flow_outputs()
+        if not self.cad_graph:
+            self.cad_facility_error = "DXF Graph 변환 결과가 없습니다."
+            return
+        try:
+            self.cad_facility = build_facility_from_cad_graph(self.cad_graph)
+        except CadGraphFacilityError as error:
+            self.cad_facility_error = str(error)
+
+    def cad_graph_changed(self) -> None:
+        """Apply manual direction edits to the next Random From-To analysis."""
+
+        self._bind_current_cad_graph(clear_outputs=True)
+        self.refresh()
+
+    def _resolve_random_flow_facility(self) -> Dict[str, Any]:
+        """Return only the explicitly active layout, never a hidden sample fallback."""
+
+        if self._active_layout_kind == "cad":
+            self._bind_current_cad_graph(clear_outputs=False)
+            if not self.cad_facility:
+                raise CadGraphFacilityError(
+                    self.cad_facility_error
+                    or "현재 CAD Graph를 Random LA Facility로 연결할 수 없습니다."
+                )
+            return self.cad_facility
+        if not self.facility:
+            raise CadGraphFacilityError(
+                "Node, Edge, Station이 포함된 Facility JSON을 먼저 연결해 주세요."
+            )
+        return self.facility
+
     def generate_random_flow(self) -> None:
         if self._random_flow_worker is not None and self._random_flow_worker.isRunning():
             QMessageBox.information(self, "생성 중", "현재 랜덤 From-To 경로 계산이 끝날 때까지 기다려 주세요.")
             return
-        if not self.facility:
+        try:
+            facility = self._resolve_random_flow_facility()
+        except CadGraphFacilityError as error:
             QMessageBox.warning(
                 self,
-                "Facility JSON 필요",
-                "Node, Edge, Station이 포함된 Facility JSON을 먼저 연결해 주세요. "
-                "DXF Graph만으로는 Station ID와 연결 Node를 확정할 수 없습니다.",
+                "분석 레이아웃 확인 필요",
+                f"{error}\n\n현재 CAD를 선택한 상태에서는 자동 샘플 Facility로 대체하지 않습니다.",
             )
             self.switch_page(1)
             return
-        stations = self.facility.get("stations", [])
+        stations = facility.get("stations", [])
         if not isinstance(stations, list) or len(stations) < 2:
             QMessageBox.warning(self, "Station 부족", "랜덤 From-To 생성에는 Station이 2개 이상 필요합니다.")
             return
@@ -1003,7 +1109,7 @@ class MainWindow(QMainWindow):
         moves = self.random_moves_per_hour.value()
         seed = self.random_seed.value()
         model_name = str(
-            self.facility.get("model_id")
+            facility.get("model_id")
             or (self.facility_path.stem if self.facility_path else "facility")
         )
         self.random_flow_generate_button.setEnabled(False)
@@ -1013,13 +1119,14 @@ class MainWindow(QMainWindow):
         )
         self.statusBar().showMessage("랜덤 From-To 생성 및 LA 정적분석 중…")
         worker = RandomWorkloadWorker(
-            self.facility,
+            facility,
             moves,
             seed,
             default_generated_output_root(),
             model_name,
             self,
         )
+        self._random_flow_facility = facility
         self._random_flow_worker = worker
         worker.completed.connect(self._random_flow_ready)
         worker.failed.connect(self._random_flow_failed)
@@ -1029,11 +1136,28 @@ class MainWindow(QMainWindow):
 
     def _random_flow_ready(self, payload: object) -> None:
         workload, saved = payload  # type: ignore[misc]
+        target_facility = self._random_flow_facility
+        if target_facility is None:
+            return
+        if self._active_layout_kind == "cad" and self.cad_facility:
+            target_revision = str(target_facility.get("revision_id", ""))
+            current_revision = str(self.cad_facility.get("revision_id", ""))
+            if target_revision != current_revision:
+                QMessageBox.warning(
+                    self,
+                    "분석 결과 폐기",
+                    "경로 계산 중 CAD Graph 방향 또는 도면이 변경되어 이전 Graph의 "
+                    "결과를 화면에 연결하지 않았습니다. 현재 Graph로 다시 실행해 주세요.",
+                )
+                return
+        self.facility = target_facility
+        self.facility_path = saved.facility_json_path
         self.scenario = workload.scenario
         self.analysis = workload.analysis
         self.scenario_path = saved.scenario_json_path
         self.demand_path = saved.demand_csv_path
         if hasattr(self, "file_cards"):
+            self.file_cards["facility"].set_path(self.facility_path)
             self.file_cards["scenario"].set_path(self.scenario_path)
             self.file_cards["demand"].set_path(self.demand_path)
         self.refresh()
@@ -1050,7 +1174,7 @@ class MainWindow(QMainWindow):
         )
         self._random_flow_dialog = show_random_flow_dialog(
             self,
-            self.facility or {},
+            target_facility,
             workload,
             saved,
         )
@@ -1064,6 +1188,8 @@ class MainWindow(QMainWindow):
         self.random_flow_generate_button.setEnabled(True)
         self.random_flow_generate_button.setText("랜덤 From-To 생성 · 정적분석")
         self._random_flow_worker = None
+        self._random_flow_facility = None
+        self.refresh()
 
     def run_core(self, action: str) -> None:
         if self.process.state() != QProcess.ProcessState.NotRunning:
@@ -1164,6 +1290,7 @@ class MainWindow(QMainWindow):
         )
 
     def convert_cad_graph(self) -> None:
+        self._active_layout_kind = "cad"
         if not self.cad_path:
             QMessageBox.warning(self, "DXF 파일 필요", "CAD 원본에서 DXF 파일을 먼저 선택해 주세요.")
             return
@@ -1185,6 +1312,9 @@ class MainWindow(QMainWindow):
             )
         except (DxfConversionError, OSError) as error:
             self.cad_graph = None
+            self.cad_facility = None
+            self.cad_facility_error = str(error)
+            self._clear_random_flow_outputs()
             self.cad_graph_path = None
             self.cad_graph_view.set_graph(None)
             self.cad_save_button.setEnabled(False)
@@ -1196,22 +1326,29 @@ class MainWindow(QMainWindow):
 
         self.cad_graph = graph
         self.cad_graph_path = None
+        self._bind_current_cad_graph(clear_outputs=True)
         self.cad_graph_view.set_graph(graph)
         self.cad_save_button.setEnabled(True)
         metadata = graph["metadata"]
         statistics = metadata["statistics"]
         layers_text = ", ".join(metadata["selected_layers"])
+        random_binding = (
+            f"Random LA · Station {len(self.cad_facility.get('stations', []))}개 연결"
+            if self.cad_facility
+            else f"Random LA 연결 불가 · {self.cad_facility_error}"
+        )
         self.cad_graph_status.setText(
             f"{statistics['node_count']} Nodes  ·  {statistics['edge_count']} Edges  ·  "
             f"{statistics['component_count']} Components\n"
             f"방향 추정 {statistics['edge_count'] - statistics['unresolved_direction_count']} / {statistics['edge_count']}  ·  "
-            f"Layer {layers_text}  ·  저장 전"
+            f"Layer {layers_text}  ·  저장 전\n{random_binding}"
         )
         self.cad_graph_status.setToolTip("방향은 CAD geometry 기반 추정값입니다. 실제 OHT 운행 방향과 대조가 필요합니다.")
         self.statusBar().showMessage(
             f"DXF Graph 변환 완료 · {statistics['node_count']} nodes / {statistics['edge_count']} edges",
             8000,
         )
+        self.refresh()
 
     def save_cad_graph(self) -> None:
         if not self.cad_graph or not self.cad_path:

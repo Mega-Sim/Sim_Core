@@ -140,6 +140,9 @@ class GraphSelectionController(QObject):
                 "선택 영역에 반전 가능한 방향성 Edge가 없습니다.",
             )
             return
+        graph_changed = getattr(self.owner, "cad_graph_changed", None)
+        if callable(graph_changed):
+            graph_changed()
         self.refresh_views()
         status = getattr(self.owner, "cad_graph_status", None)
         if status is not None:

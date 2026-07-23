@@ -274,7 +274,7 @@ CLI 명령은 2차와 동일하며, `analyze` JSON report에 `edge_flows`·`node
 - DXF LINE·ARC를 방향성 Graph JSON으로 실제 변환하고 2D 화면에서 확인·저장
 - Bottleneck/ROI, Policy A/B, Digital Twin의 후속 입력 계약 미리보기
 
-DXF Graph 변환은 데스크톱 앱 안에서 실제로 동작합니다. 다만 geometry 기반 방향은 추정값이므로 실제 OHT 방향 데이터와 대조가 필요하며, 생성된 Graph JSON을 Canonical Facility Model로 승격하는 Adapter는 후속 범위입니다. Bottleneck/ROI 등 나머지 5차 이후 분석 기능은 화면에서 `UI 프로토타입`으로 구분합니다.
+DXF Graph 변환은 데스크톱 앱 안에서 실제로 동작합니다. 현재 Graph의 수동 방향 수정과 `station-*`/`ST-*` TEXT 라벨을 Canonical Facility 입력으로 변환하는 Adapter도 Random From-To 정적분석에 연결했습니다. Station 라벨은 가장 가까운 Rail 중앙선에 투영되고 해당 위치에서 Edge가 분할됩니다. geometry 기반 방향은 여전히 추정값이므로 실제 OHT 방향 데이터와 대조가 필요합니다. Bottleneck/ROI 등 나머지 5차 이후 분석 기능은 화면에서 `UI 프로토타입`으로 구분합니다.
 
 GitHub Actions의 `Sim_Core Native Desktop - Windows EXE` 결과에서 `Sim_Core_Flow_Workbench-windows-x64` Artifact를 내려받아 압축을 푼 뒤 `Sim_Core_Flow_Workbench.exe`를 실행하면 됩니다. 자세한 개발·패키징 방법은 [Native Desktop Workbench 안내](desktop/README.md)를 참고합니다.
 

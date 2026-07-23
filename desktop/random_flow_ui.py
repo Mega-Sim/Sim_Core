@@ -40,6 +40,14 @@ from random_flow_analysis import (
 )
 
 
+def _uses_dxf_screen_coordinates(facility: Mapping[str, Any]) -> bool:
+    return any(
+        isinstance(artifact, Mapping)
+        and str(artifact.get("kind", "")).casefold() == "dxf"
+        for artifact in facility.get("source_artifacts", [])
+    )
+
+
 class RandomWorkloadWorker(QThread):
     """Generate and save a workload without blocking the Qt UI thread."""
 
@@ -71,6 +79,7 @@ class RandomWorkloadWorker(QThread):
             )
             saved = save_random_workload(
                 workload,
+                self._facility,
                 self._output_root,
                 model_name=self._model_name,
             )
@@ -135,11 +144,12 @@ class FlowHeatmapView(QGraphicsView):
         min_x, max_x = min(xs), max(xs)
         min_y, max_y = min(ys), max(ys)
         scale = 1150.0 / max(max_x - min_x, max_y - min_y, 1.0)
+        y_direction = 1.0 if _uses_dxf_screen_coordinates(facility) else -1.0
 
         def point(raw: Mapping[str, Any]) -> tuple[float, float]:
             return (
                 (float(raw.get("x", 0.0)) - min_x) * scale,
-                -(float(raw.get("y", 0.0)) - min_y) * scale,
+                y_direction * (float(raw.get("y", 0.0)) - min_y) * scale,
             )
 
         flows = {
@@ -367,7 +377,8 @@ def show_random_flow_dialog(
     layout.addWidget(view, 1)
 
     footer = QLabel(
-        f"Seed {workload.seed} · CSV {saved.demand_csv_path.name} · "
+        f"Seed {workload.seed} · Facility {saved.facility_json_path.name} · "
+        f"CSV {saved.demand_csv_path.name} · "
         f"Scenario {saved.scenario_json_path.name} · 분석 {saved.analysis_json_path.name}"
     )
     footer.setObjectName("TinyMuted")

@@ -52,6 +52,12 @@ def main() -> int:
         if not window.cad_graph_view.scene().items():
             raise RuntimeError("DXF graph preview did not render")
 
+    # CAD selection intentionally invalidates the auto-loaded sample inputs so
+    # the app can never analyze an unrelated sample graph. Explicitly switch
+    # back to the sample before exercising the authoritative Core path.
+    window.load_sample()
+    window.refresh()
+
     result = {"exit_code": None, "timed_out": False}
 
     def stop_on_timeout() -> None:

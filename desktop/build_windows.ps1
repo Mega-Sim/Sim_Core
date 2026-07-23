@@ -21,6 +21,10 @@ $Python = if (Get-Command python -ErrorAction SilentlyContinue) {
 if ($LASTEXITCODE -ne 0) {
     throw "DXF graph converter tests failed."
 }
+& $Python desktop\test_cad_graph_facility.py
+if ($LASTEXITCODE -ne 0) {
+    throw "CAD graph to Random LA Facility binding tests failed."
+}
 & $Python desktop\test_random_flow_analysis.py
 if ($LASTEXITCODE -ne 0) {
     throw "Random From-To static analysis tests failed."

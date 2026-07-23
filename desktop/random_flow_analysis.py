@@ -68,6 +68,7 @@ class SavedRandomWorkload:
     """Paths of a generated workload saved without overwriting existing data."""
 
     directory: Path
+    facility_json_path: Path
     demand_csv_path: Path
     scenario_json_path: Path
     analysis_json_path: Path
@@ -591,21 +592,33 @@ def _unique_output_directory(
 
 def save_random_workload(
     workload: GeneratedRandomWorkload,
+    facility: Mapping[str, Any],
     output_root: str | Path,
     *,
     model_name: str = "facility",
     timestamp: str | None = None,
 ) -> SavedRandomWorkload:
-    """Save CSV, runnable Scenario JSON, and LA report in a new directory."""
+    """Save the exact Facility, CSV, runnable Scenario, and LA report together."""
+
+    facility_revision = str(facility.get("revision_id", "")).strip()
+    scenario_revision = str(workload.scenario.get("model_revision_id", "")).strip()
+    if not facility_revision or facility_revision != scenario_revision:
+        raise RandomFlowError(
+            "저장할 Facility revision_id와 생성 Scenario model_revision_id가 일치하지 않습니다."
+        )
 
     root = Path(output_root)
     root.mkdir(parents=True, exist_ok=True)
     directory = _unique_output_directory(root, model_name, workload, timestamp)
     directory.mkdir(parents=False, exist_ok=False)
+    facility_path = directory / "random_facility.json"
     csv_path = directory / "random_from_to.csv"
     scenario_path = directory / "random_scenario.json"
     analysis_path = directory / "random_la_analysis.json"
 
+    with facility_path.open("w", encoding="utf-8") as stream:
+        json.dump(facility, stream, ensure_ascii=False, indent=2)
+        stream.write("\n")
     with csv_path.open("w", encoding="utf-8", newline="") as stream:
         writer = csv.DictWriter(
             stream,
@@ -650,6 +663,7 @@ def save_random_workload(
 
     return SavedRandomWorkload(
         directory=directory,
+        facility_json_path=facility_path,
         demand_csv_path=csv_path,
         scenario_json_path=scenario_path,
         analysis_json_path=analysis_path,
