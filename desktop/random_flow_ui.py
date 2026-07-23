@@ -1,4 +1,4 @@
-"""Qt worker and popup for random From-To LA-style static flow analysis."""
+"""Qt worker and popup for random From-To LA-style flow analysis and animation."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import math
 from pathlib import Path
 from typing import Any, Mapping
 
-from PySide6.QtCore import QThread, Qt, QUrl, Signal
+from PySide6.QtCore import QThread, QTimer, Qt, QUrl, Signal
 from PySide6.QtGui import (
     QColor,
     QDesktopServices,
@@ -17,6 +17,7 @@ from PySide6.QtGui import (
     QPen,
 )
 from PySide6.QtWidgets import (
+    QComboBox,
     QDialog,
     QFrame,
     QGraphicsEllipseItem,
@@ -38,6 +39,12 @@ from random_flow_analysis import (
     generate_random_workload,
     save_random_workload,
 )
+from random_flow_animation import locate_route_pose, route_total_time_us
+
+
+MAX_ANIMATED_VEHICLES = 300
+DEFAULT_ANIMATION_SPEED = 300.0
+ANIMATION_INTERVAL_MS = 40
 
 
 class RandomWorkloadWorker(QThread):
@@ -89,11 +96,27 @@ def heatmap_color(relative_load: float) -> QColor:
 
 
 class FlowHeatmapView(QGraphicsView):
-    """Canonical facility renderer dedicated to static route heatmaps."""
+    """Facility heatmap plus path-bound vehicle preview animation.
+
+    Vehicle rendering follows an AutoMod-style path-bound rule: the logical state
+    is the current directed Edge and progress on that Edge. X/Y/heading are derived
+    from the Edge centerline polyline every frame, never integrated independently.
+    """
+
+    animation_status_changed = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._fit_bounds = None
+        self._edge_geometries: dict[str, dict[str, object]] = {}
+        self._vehicle_states: list[dict[str, object]] = []
+        self._simulation_time_us = 0
+        self._animation_duration_us = 0
+        self._speed_factor = DEFAULT_ANIMATION_SPEED
+        self._total_source_vehicle_count = 0
+        self._animation_timer = QTimer(self)
+        self._animation_timer.setInterval(ANIMATION_INTERVAL_MS)
+        self._animation_timer.timeout.connect(self._advance_animation)
         self.setScene(QGraphicsScene(self))
         self.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
@@ -115,6 +138,10 @@ class FlowHeatmapView(QGraphicsView):
         facility: Mapping[str, Any],
         analysis: Mapping[str, Any],
     ) -> None:
+        self.pause_animation()
+        self._vehicle_states.clear()
+        self._edge_geometries.clear()
+        self._simulation_time_us = 0
         scene = self.scene()
         scene.clear()
         nodes = facility.get("nodes", [])
@@ -170,12 +197,26 @@ class FlowHeatmapView(QGraphicsView):
                     continue
                 polyline = [start, end]
             try:
+                scene_points = [point(raw) for raw in polyline]
                 path = QPainterPath()
-                path.moveTo(*point(polyline[0]))
-                for raw in polyline[1:]:
-                    path.lineTo(*point(raw))
+                path.moveTo(*scene_points[0])
+                for scene_point in scene_points[1:]:
+                    path.lineTo(*scene_point)
             except (AttributeError, TypeError, ValueError):
                 continue
+
+            try:
+                length_um = int(edge.get("length_um", 0))
+                speed_limit = int(edge.get("speed_limit_um_per_s", 0))
+            except (TypeError, ValueError):
+                continue
+            if length_um > 0 and speed_limit > 0:
+                self._edge_geometries[edge_id] = {
+                    "points": scene_points,
+                    "length_um": length_um,
+                    "speed_limit_um_per_s": speed_limit,
+                }
+
             observation = flows.get(edge_id, {})
             moves = float(observation.get("expected_moves_per_hour", 0.0) or 0.0)
             relative = moves / max_moves if max_moves > 0 else 0.0
@@ -252,6 +293,195 @@ class FlowHeatmapView(QGraphicsView):
         self.resetTransform()
         self.fitInView(bounds, Qt.AspectRatioMode.KeepAspectRatio)
 
+    def configure_vehicle_animation(
+        self,
+        workload: GeneratedRandomWorkload,
+        *,
+        max_vehicles: int = MAX_ANIMATED_VEHICLES,
+    ) -> None:
+        """Create a bounded preview fleet from generated jobs and OD routes."""
+
+        self.pause_animation()
+        self._remove_vehicle_items()
+        self._simulation_time_us = 0
+
+        route_lookup = {
+            (
+                str(item.get("from_station_id", "")),
+                str(item.get("to_station_id", "")),
+            ): tuple(str(edge_id) for edge_id in item.get("edge_ids", []))
+            for item in workload.analysis.get("demand_routes", [])
+            if isinstance(item, Mapping)
+        }
+        jobs = [
+            item
+            for item in workload.scenario.get("jobs", [])
+            if isinstance(item, Mapping)
+        ]
+        self._total_source_vehicle_count = len(jobs)
+        if not jobs or not route_lookup or not self._edge_geometries:
+            self._emit_animation_status(0, 0, 0)
+            return
+
+        limit = max(1, min(int(max_vehicles), len(jobs)))
+        if limit == len(jobs):
+            selected_jobs = jobs
+        elif limit == 1:
+            selected_jobs = [jobs[0]]
+        else:
+            indices = [
+                round(index * (len(jobs) - 1) / (limit - 1))
+                for index in range(limit)
+            ]
+            selected_jobs = [jobs[index] for index in indices]
+
+        vehicle_shape = QPainterPath()
+        vehicle_shape.moveTo(6.5, 0.0)
+        vehicle_shape.lineTo(-4.5, -3.6)
+        vehicle_shape.lineTo(-2.5, 0.0)
+        vehicle_shape.lineTo(-4.5, 3.6)
+        vehicle_shape.closeSubpath()
+
+        duration = 0
+        for job in selected_jobs:
+            pair = (
+                str(job.get("pickup_station_id", "")),
+                str(job.get("dropoff_station_id", "")),
+            )
+            edge_ids = route_lookup.get(pair)
+            if not edge_ids or any(edge_id not in self._edge_geometries for edge_id in edge_ids):
+                continue
+            try:
+                route_time = route_total_time_us(edge_ids, self._edge_geometries)
+                release_time = int(job.get("release_time_us", 0) or 0)
+            except (KeyError, TypeError, ValueError):
+                continue
+
+            item = QGraphicsPathItem(vehicle_shape)
+            item.setBrush(QColor("#f4fbff"))
+            item.setPen(QPen(QColor("#102a38"), 1.0))
+            item.setFlag(
+                QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations,
+                True,
+            )
+            item.setZValue(12)
+            item.setToolTip(
+                f"{job.get('id', '')}\n"
+                f"{pair[0]} → {pair[1]}\n"
+                "Vehicle 위치는 Edge 중앙선에서 계산됩니다."
+            )
+            item.hide()
+            self.scene().addItem(item)
+            self._vehicle_states.append(
+                {
+                    "item": item,
+                    "edge_ids": edge_ids,
+                    "release_time_us": release_time,
+                    "route_time_us": route_time,
+                }
+            )
+            duration = max(duration, release_time + route_time)
+
+        self._animation_duration_us = max(
+            duration,
+            int(workload.scenario.get("duration_us", 0) or 0),
+        )
+        self._update_vehicle_items()
+
+    def _remove_vehicle_items(self) -> None:
+        scene = self.scene()
+        for state in self._vehicle_states:
+            item = state.get("item")
+            if isinstance(item, QGraphicsPathItem) and item.scene() is scene:
+                scene.removeItem(item)
+        self._vehicle_states.clear()
+
+    def set_animation_speed(self, speed_factor: float) -> None:
+        self._speed_factor = max(1.0, float(speed_factor))
+        self._update_vehicle_items()
+
+    def animation_running(self) -> bool:
+        return self._animation_timer.isActive()
+
+    def start_animation(self) -> None:
+        if not self._vehicle_states:
+            return
+        if self._animation_duration_us > 0 and self._simulation_time_us >= self._animation_duration_us:
+            self._simulation_time_us = 0
+        self._animation_timer.start()
+        self._update_vehicle_items()
+
+    def pause_animation(self) -> None:
+        self._animation_timer.stop()
+
+    def reset_animation(self) -> None:
+        self.pause_animation()
+        self._simulation_time_us = 0
+        self._update_vehicle_items()
+
+    def _advance_animation(self) -> None:
+        delta_us = int(
+            self._animation_timer.interval()
+            * 1_000
+            * self._speed_factor
+        )
+        self._simulation_time_us += max(1, delta_us)
+        if (
+            self._animation_duration_us > 0
+            and self._simulation_time_us >= self._animation_duration_us
+        ):
+            self._simulation_time_us = self._animation_duration_us
+            self.pause_animation()
+        self._update_vehicle_items()
+
+    def _update_vehicle_items(self) -> None:
+        active = 0
+        completed = 0
+        released = 0
+        for state in self._vehicle_states:
+            item = state.get("item")
+            if not isinstance(item, QGraphicsPathItem):
+                continue
+            release_time = int(state.get("release_time_us", 0) or 0)
+            if self._simulation_time_us < release_time:
+                item.hide()
+                continue
+            released += 1
+            elapsed = self._simulation_time_us - release_time
+            try:
+                pose = locate_route_pose(
+                    state.get("edge_ids", ()),  # type: ignore[arg-type]
+                    self._edge_geometries,
+                    elapsed,
+                )
+            except (KeyError, TypeError, ValueError):
+                item.hide()
+                continue
+            if pose.completed:
+                completed += 1
+                item.hide()
+                continue
+            active += 1
+            item.setPos(pose.x, pose.y)
+            item.setRotation(pose.heading_degrees)
+            item.show()
+        self._emit_animation_status(active, released, completed)
+
+    def _emit_animation_status(self, active: int, released: int, completed: int) -> None:
+        seconds = self._simulation_time_us // 1_000_000
+        hours, remainder = divmod(seconds, 3_600)
+        minutes, second = divmod(remainder, 60)
+        preview = len(self._vehicle_states)
+        total = self._total_source_vehicle_count
+        state = "주행 중" if self.animation_running() else "일시정지"
+        if self._animation_duration_us > 0 and self._simulation_time_us >= self._animation_duration_us:
+            state = "완료"
+        self.animation_status_changed.emit(
+            f"{state} · 시뮬레이션 {hours:02d}:{minutes:02d}:{second:02d} · "
+            f"화면 {active}대 주행 · {completed}/{released}대 완료 · "
+            f"미리보기 {preview}/{total}대 · {self._speed_factor:g}x"
+        )
+
 
 def _metric(title: str, value: str) -> QFrame:
     frame = QFrame()
@@ -285,11 +515,11 @@ def show_random_flow_dialog(
     workload: GeneratedRandomWorkload,
     saved: SavedRandomWorkload,
 ) -> QDialog:
-    """Show the requested green-to-red static analysis popup."""
+    """Show the static heatmap and a path-bound Random From-To vehicle preview."""
 
     dialog = QDialog(parent)
     dialog.setObjectName("RandomFlowDialog")
-    dialog.setWindowTitle("Sim_Core · Random From-To LA 정적분석")
+    dialog.setWindowTitle("Sim_Core · Random From-To LA 분석 + Vehicle 경로주행")
     dialog.resize(1480, 900)
     dialog.setStyleSheet("QDialog#RandomFlowDialog { background: #071019; }")
     dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
@@ -299,11 +529,11 @@ def show_random_flow_dialog(
 
     header = QHBoxLayout()
     texts = QVBoxLayout()
-    title = QLabel("Random From-To · Edge 통행량 Heatmap")
+    title = QLabel("Random From-To · Edge 통행량 Heatmap + Vehicle 경로주행")
     title.setObjectName("SectionTitle")
     description = QLabel(
-        "입력한 시간당 반송을 방향성 최단경로에 누적했습니다. "
-        "초록색은 저사용, 빨간색은 고사용 Edge입니다."
+        "방향성 Dijkstra 경로의 Edge 통행량을 초록→빨강으로 표시하고, "
+        "Vehicle은 현재 Edge와 Edge 진행률만으로 중앙선 위를 주행합니다."
     )
     description.setObjectName("Muted")
     texts.addWidget(title)
@@ -364,14 +594,61 @@ def show_random_flow_dialog(
     view = FlowHeatmapView(dialog)
     view.setObjectName("RandomFlowHeatmap")
     view.set_heatmap(facility, workload.analysis)
+    view.configure_vehicle_animation(workload)
+
+    animation_controls = QHBoxLayout()
+    play_pause = _button("Vehicle 주행 시작", primary=True)
+    reset = _button("처음부터")
+    speed = QComboBox()
+    for label, factor in (("60x", 60.0), ("300x", 300.0), ("1200x", 1200.0)):
+        speed.addItem(label, factor)
+    speed.setCurrentIndex(1)
+    speed.setMinimumWidth(100)
+    status = QLabel("Vehicle 경로주행 준비")
+    status.setObjectName("Muted")
+    status.setWordWrap(True)
+
+    def toggle_animation() -> None:
+        if view.animation_running():
+            view.pause_animation()
+            play_pause.setText("Vehicle 주행 시작")
+            view._update_vehicle_items()
+        else:
+            view.start_animation()
+            play_pause.setText("Vehicle 주행 일시정지")
+
+    def reset_animation() -> None:
+        view.reset_animation()
+        play_pause.setText("Vehicle 주행 시작")
+
+    def change_speed(_index: int) -> None:
+        factor = speed.currentData()
+        view.set_animation_speed(float(factor or DEFAULT_ANIMATION_SPEED))
+
+    play_pause.clicked.connect(toggle_animation)
+    reset.clicked.connect(reset_animation)
+    speed.currentIndexChanged.connect(change_speed)
+    view.animation_status_changed.connect(status.setText)
+    animation_controls.addWidget(play_pause)
+    animation_controls.addWidget(reset)
+    animation_controls.addWidget(QLabel("재생 속도"))
+    animation_controls.addWidget(speed)
+    animation_controls.addSpacing(12)
+    animation_controls.addWidget(status, 1)
+    layout.addLayout(animation_controls)
     layout.addWidget(view, 1)
 
     footer = QLabel(
         f"Seed {workload.seed} · CSV {saved.demand_csv_path.name} · "
-        f"Scenario {saved.scenario_json_path.name} · 분석 {saved.analysis_json_path.name}"
+        f"Scenario {saved.scenario_json_path.name} · 분석 {saved.analysis_json_path.name} · "
+        f"화면 성능 보호를 위해 최대 {MAX_ANIMATED_VEHICLES}대만 균등 샘플링하여 애니메이션 표시"
     )
     footer.setObjectName("TinyMuted")
     footer.setToolTip(str(saved.directory))
     layout.addWidget(footer)
+
+    dialog.finished.connect(lambda _result: view.pause_animation())
     dialog.show()
+    view.start_animation()
+    play_pause.setText("Vehicle 주행 일시정지")
     return dialog
