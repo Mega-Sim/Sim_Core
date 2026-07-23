@@ -99,15 +99,25 @@ def main() -> int:
         if not view.animation_running():
             raise RuntimeError("vehicle centerline animation did not auto-start")
 
-        # Advance the preview briefly. Every visible vehicle item is positioned only
-        # through locate_route_pose(), which derives X/Y from its current Edge polyline.
-        local_loop = QEventLoop()
-        QTimer.singleShot(150, local_loop.quit)
-        local_loop.exec()
+        # Reset to t=0. The first generated job is released at t=0, so at least one
+        # vehicle must be placed exactly by route/Edge interpolation without relying
+        # on timing-sensitive event-loop delays.
+        view.reset_animation()
         application.processEvents()
         configured_items = [state.get("item") for state in view._vehicle_states]
         if not any(item is not None and item.isVisible() for item in configured_items):
-            raise RuntimeError("no released vehicle became visible on the path network")
+            raise RuntimeError("no t=0 vehicle was placed on the path network")
+
+        view.start_animation()
+        local_loop = QEventLoop()
+        QTimer.singleShot(80, local_loop.quit)
+        local_loop.exec()
+        application.processEvents()
+        if not view.animation_running():
+            # Very small sample layouts can finish quickly at 300x; completion itself
+            # is acceptable, but a non-zero simulation time proves timer advancement.
+            if view._simulation_time_us <= 0:
+                raise RuntimeError("vehicle animation timer did not advance")
 
         dialog.close()
         window.close()
