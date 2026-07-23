@@ -5,6 +5,7 @@ import sys
 
 import app_base as base
 from graph_enhancer_compat import install_compatible_enhancements
+from graph_render_optimization import install_fast_graph_renderer
 from graph_ui_patch import install_dark_graph_renderer, install_graph_interaction
 from pan_fix import install_bidirectional_pan
 
@@ -12,6 +13,7 @@ from pan_fix import install_bidirectional_pan
 # Shared graph behavior for preview and graph-only enlarged view.
 install_graph_interaction(base.NetworkView)
 install_dark_graph_renderer(base.NetworkView)
+install_fast_graph_renderer(base.NetworkView)
 install_bidirectional_pan(base.NetworkView)
 
 MainWindow = base.MainWindow
