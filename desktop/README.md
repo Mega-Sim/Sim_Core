@@ -54,7 +54,7 @@ dist\Sim_Core_Flow_Workbench.exe
 | `sim-core validate` | 실제 Core 연결 |
 | `sim-core analyze` | 실제 Core 연결 |
 | `sim-core run` | 실제 Core 연결 |
-| DXF → 방향성 Graph JSON | 실제 변환·화면 미리보기·저장 연결 |
+| DXF / SemiLA `.rail` → 방향성 Rail Graph JSON | 실제 변환·화면 미리보기·저장 연결 |
 | Graph 전용 확대 팝업 | 네이티브 구현 |
 | Edge 클릭·드래그 블록 선택 | 네이티브 구현 |
 | 선택 Edge 방향 반전 | Graph JSON에 반영 |
@@ -64,12 +64,12 @@ dist\Sim_Core_Flow_Workbench.exe
 
 Windows 패키징 과정에서는 `desktop/smoke_test.py`와 `desktop/graph_ui_smoke_test.py`를 실행해 기본 Workbench와 Graph UI 개선 기능을 자동 확인합니다.
 
-## DXF Graph 만들기
+## DXF / Rail Graph 만들기
 
 1. 왼쪽에서 `입력 · CAD`를 엽니다.
-2. `CAD 원본`의 `파일 선택`에서 `.dxf` 파일을 고릅니다.
-3. 선택과 동시에 LINE·ARC geometry를 Node와 방향성 Edge로 변환해 아래 화면에 표시합니다.
-4. 필요하면 Rail Layer, ARC 분할 수, 좌표 반올림 값을 바꾸고 `DXF 다시 변환`을 누릅니다.
+2. `CAD / Rail`의 `파일 선택`에서 `.dxf` 또는 SemiLA `.rail` 파일을 고릅니다.
+3. DXF는 LINE·ARC를 경량 Rail Graph로 변환하고, `.rail`은 저장된 NODE/LINK/RAILLIST를 바로 읽어 표시합니다.
+4. DXF라면 필요에 따라 Rail Layer, ARC 표시 분할 수, 좌표 반올림 값을 바꾸고 `Rail Graph 다시 변환`을 누릅니다.
 5. 메인 캔버스에서 Edge를 클릭하거나 빈 영역에서 마우스를 드래그해 여러 Edge를 블록으로 선택합니다.
 6. `선택 방향 반전`을 누르면 선택된 방향성 Edge의 `dir` 값이 반대로 변경됩니다.
 7. 넓게 보고 싶으면 `그래프만 크게 보기`를 눌러 Graph 전용 팝업을 엽니다. 팝업에서도 선택과 방향 반전이 가능합니다.
@@ -79,7 +79,7 @@ Rail Layer를 비워 두면 모든 LINE·ARC Layer를 읽습니다. 여러 Layer
 
 방향은 CAD geometry의 연결성과 진행 벡터를 이용한 추정값입니다. 실제 OHT 운행 방향 데이터와 반드시 대조한 뒤 시뮬레이션 입력으로 승격해야 합니다.
 
-대형 FAB 도면은 Linear Analyzer 자료와 같은 방식으로 전체 geometry를 무차별 비교하지 않고, 선분 경계 안에 있는 endpoint 후보만 공간 인덱스로 조회합니다. `development_src/Linear_Analyzer`의 대형 DXF를 사용하는 성능 회귀 시험이 Windows 빌드 과정에 포함되어 있습니다.
+대형 FAB 도면의 ARC는 처음부터 하나의 논리 Rail Edge로 유지합니다. ARC를 여러 임시 Edge로 만든 뒤 DXF를 다시 읽어 합치던 단계가 없으며, 분기점이 실제 ARC 내부에 닿을 때만 그 지점에서 나눕니다. 대형 미리보기는 Edge·화살표·Node를 소수의 Qt 일괄 경로로 렌더링하고, 영역 선택은 좌표 기반으로 처리합니다. AutoMod PM 생성은 이 빠른 Rail 미리보기와 분리된 후단 단계입니다.
 
 UI 없이 직접 변환할 수도 있습니다.
 
@@ -96,4 +96,5 @@ py desktop\dxf_graph_converter.py layout.dxf `
 
 ```powershell
 py desktop\test_dxf_graph_converter.py
+py desktop\test_rail_file.py
 ```

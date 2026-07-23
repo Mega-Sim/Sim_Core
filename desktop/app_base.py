@@ -15,7 +15,6 @@ import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
-from time import perf_counter
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import QLineF, QProcess, QRectF, Qt, Signal
@@ -53,6 +52,7 @@ from dxf_graph_converter import (
     convert_dxf_to_graph,
     save_graph as write_graph_json,
 )
+from rail_file import RailFileError, load_rail_graph
 
 
 APP_VERSION = "0.3.0"
@@ -697,7 +697,7 @@ class MainWindow(QMainWindow):
             ("facility", "{ }", "Facility JSON", "Node, Edge, Station과 좌표 정보를 포함합니다.", "JSON (*.json)", False),
             ("scenario", "▷", "Scenario JSON", "차량, Job과 실행시간을 정의합니다.", "JSON (*.json)", False),
             ("demand", "≋", "From-To CSV", "Station 간 시간당 예상 반송량입니다.", "CSV (*.csv)", False),
-            ("cad", "⌑", "CAD 원본", "DXF를 열어 방향성 Graph JSON으로 즉시 변환합니다.", "DXF (*.dxf)", False, "DXF 변환"),
+            ("cad", "⌑", "CAD / Rail", "DXF는 경량 Rail Graph로 변환하고 .rail은 즉시 엽니다.", "Rail / DXF (*.rail *.dxf)", False, "Rail 변환"),
         ]
         for definition in definitions:
             card = FileCard(*definition)
@@ -708,7 +708,7 @@ class MainWindow(QMainWindow):
         contract = panel()
         form = QGridLayout(contract)
         form.setContentsMargins(22, 19, 22, 19)
-        form.addWidget(section_title("DXF GRAPH ADAPTER", "CAD 변환 설정", "Graph_Maker 참조 로직으로 LINE·ARC를 Node/방향성 Edge로 변환합니다."), 0, 0, 1, 4)
+        form.addWidget(section_title("FAST RAIL GRAPH ADAPTER", "CAD / Rail 변환 설정", "DXF LINE·ARC를 논리 Rail Edge로 바로 만들고 AutoMod PM 변환은 후단으로 분리합니다."), 0, 0, 1, 4)
         self.cad_unit = QComboBox()
         self.cad_unit.addItems(["millimeter", "meter", "micrometer", "inch"])
         self.rail_layer = QLineEdit()
@@ -719,10 +719,10 @@ class MainWindow(QMainWindow):
         self.coordinate_precision = QComboBox()
         self.coordinate_precision.addItems(["2", "3", "4", "6"])
         self.coordinate_precision.setCurrentText("3")
-        for column, (name, field) in enumerate([("도면 단위", self.cad_unit), ("Rail Layer (선택)", self.rail_layer), ("ARC 분할 수", self.arc_segments), ("좌표 반올림", self.coordinate_precision)]):
+        for column, (name, field) in enumerate([("도면 단위", self.cad_unit), ("Rail Layer (선택)", self.rail_layer), ("ARC 표시 정밀도", self.arc_segments), ("좌표 반올림", self.coordinate_precision)]):
             form.addWidget(styled_label(name, "FieldLabel"), 1, column)
             form.addWidget(field, 2, column)
-        self.cad_convert_button = button("↻  DXF 다시 변환", "secondary")
+        self.cad_convert_button = button("↻  Rail Graph 다시 변환", "secondary")
         self.cad_convert_button.clicked.connect(self.convert_cad_graph)
         self.cad_save_button = button("Graph JSON 저장", "primary")
         self.cad_save_button.setEnabled(False)
@@ -735,9 +735,9 @@ class MainWindow(QMainWindow):
         preview_layout = QVBoxLayout(preview)
         preview_layout.setContentsMargins(20, 17, 20, 17)
         preview_header = QHBoxLayout()
-        preview_header.addWidget(section_title("DIRECTED CAD GRAPH", "변환 결과 미리보기", "휠 확대·축소, 드래그 이동, Node·Edge 마우스 확인을 지원합니다."))
+        preview_header.addWidget(section_title("DIRECTED RAIL GRAPH", "변환 결과 미리보기", "휠 확대·축소, 드래그 이동, Node·Edge 선택을 지원합니다."))
         preview_header.addStretch(1)
-        self.cad_graph_status = QLabel("DXF 파일을 선택해 주세요.")
+        self.cad_graph_status = QLabel("DXF 또는 Rail 파일을 선택해 주세요.")
         self.cad_graph_status.setObjectName("GraphStatus")
         self.cad_graph_status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.cad_graph_status.setWordWrap(True)
@@ -904,7 +904,7 @@ class MainWindow(QMainWindow):
                 self.cad_graph_path = None
                 self.convert_cad_graph()
             self.refresh()
-        except (OSError, ValueError, json.JSONDecodeError, DxfConversionError) as error:
+        except (OSError, ValueError, json.JSONDecodeError, DxfConversionError, RailFileError) as error:
             QMessageBox.critical(self, "파일 오류", str(error))
 
     def refresh(self) -> None:
@@ -1029,7 +1029,7 @@ class MainWindow(QMainWindow):
 
     def convert_cad_graph(self) -> None:
         if not self.cad_path:
-            QMessageBox.warning(self, "DXF 파일 필요", "CAD 원본에서 DXF 파일을 먼저 선택해 주세요.")
+            QMessageBox.warning(self, "도면 파일 필요", "DXF 또는 Rail 파일을 먼저 선택해 주세요.")
             return
         layer_text = self.rail_layer.text().strip()
         layers = [
@@ -1037,27 +1037,30 @@ class MainWindow(QMainWindow):
             for item in layer_text.replace(";", ",").split(",")
             if item.strip()
         ] or None
-        self.cad_graph_status.setText("DXF geometry를 Graph로 변환하는 중입니다…")
+        source_kind = "Rail" if self.cad_path.suffix.casefold() == ".rail" else "DXF"
+        self.cad_graph_status.setText(f"{source_kind} geometry를 경량 Rail Graph로 변환하는 중입니다…")
         self.cad_convert_button.setEnabled(False)
         self.cad_save_button.setEnabled(False)
         QApplication.setOverrideCursor(Qt.WaitCursor)
         QApplication.processEvents()
-        started = perf_counter()
         try:
-            graph = convert_dxf_to_graph(
-                self.cad_path,
-                layers=layers,
-                arc_segments=int(self.arc_segments.currentText()),
-                coordinate_precision=int(self.coordinate_precision.currentText()),
-                coordinate_unit=self.cad_unit.currentText(),
-            )
-        except (DxfConversionError, OSError) as error:
+            if source_kind == "Rail":
+                graph = load_rail_graph(self.cad_path)
+            else:
+                graph = convert_dxf_to_graph(
+                    self.cad_path,
+                    layers=layers,
+                    arc_segments=int(self.arc_segments.currentText()),
+                    coordinate_precision=int(self.coordinate_precision.currentText()),
+                    coordinate_unit=self.cad_unit.currentText(),
+                )
+        except (DxfConversionError, RailFileError, OSError) as error:
             self.cad_graph = None
             self.cad_graph_path = None
             self.cad_graph_view.set_graph(None)
             self.cad_save_button.setEnabled(False)
             self.cad_graph_status.setText(f"변환 실패\n{error}")
-            QMessageBox.critical(self, "DXF 변환 실패", str(error))
+            QMessageBox.critical(self, f"{source_kind} 변환 실패", str(error))
             return
         finally:
             QApplication.restoreOverrideCursor()
@@ -1066,26 +1069,25 @@ class MainWindow(QMainWindow):
         self.cad_graph = graph
         self.cad_graph_path = None
         self.cad_graph_view.set_graph(graph)
-        elapsed = perf_counter() - started
         self.cad_save_button.setEnabled(True)
         metadata = graph["metadata"]
         statistics = metadata["statistics"]
-        layers_text = ", ".join(metadata["selected_layers"])
+        layers_text = ", ".join(metadata.get("selected_layers", [])) or source_kind
         self.cad_graph_status.setText(
             f"{statistics['node_count']} Nodes  ·  {statistics['edge_count']} Edges  ·  "
             f"{statistics['component_count']} Components\n"
             f"방향 추정 {statistics['edge_count'] - statistics['unresolved_direction_count']} / {statistics['edge_count']}  ·  "
-            f"Layer {layers_text}  ·  변환 {elapsed:.2f}초  ·  저장 전"
+            f"Source {layers_text}  ·  경량 Rail 준비 완료  ·  저장 전"
         )
         self.cad_graph_status.setToolTip("방향은 CAD geometry 기반 추정값입니다. 실제 OHT 운행 방향과 대조가 필요합니다.")
         self.statusBar().showMessage(
-            f"DXF Graph 변환 완료 · {statistics['node_count']} nodes / {statistics['edge_count']} edges · {elapsed:.2f}초",
+            f"{source_kind} Graph 변환 완료 · {statistics['node_count']} nodes / {statistics['edge_count']} edges",
             8000,
         )
 
     def save_cad_graph(self) -> None:
         if not self.cad_graph or not self.cad_path:
-            QMessageBox.warning(self, "변환 결과 필요", "DXF를 먼저 변환해 주세요.")
+            QMessageBox.warning(self, "변환 결과 필요", "DXF 또는 Rail 파일을 먼저 변환해 주세요.")
             return
         default_path = self.cad_path.with_suffix(".graph.json")
         path, _ = QFileDialog.getSaveFileName(

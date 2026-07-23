@@ -31,6 +31,10 @@ class CompatibleGraphSelectionController(enhancer.GraphSelectionController):
         return super().eventFilter(watched, event)
 
     def highlight(self) -> None:
+        batch_highlight = getattr(self.view, "set_graph_selection", None)
+        if callable(batch_highlight):
+            batch_highlight(self.selected_edges)
+            return
         # Always restore the normal rail appearance first, then highlight selection.
         for item in self.view.scene().items():
             edge_id = enhancer._edge_id_from_item(item)

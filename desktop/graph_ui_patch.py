@@ -5,18 +5,63 @@ import math
 from collections import defaultdict
 from typing import Any, Dict, Optional
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QFont, QPainterPath, QPen
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem,
     QGraphicsItem,
     QGraphicsPathItem,
-    QGraphicsSimpleTextItem,
     QGraphicsView,
 )
 
 EDGE_COLOR = QColor("#315568")
 EDGE_SELECTED_COLOR = QColor("#ffd54f")
+INTERACTIVE_EDGE_LIMIT = 2_500
+INTERACTIVE_NODE_LIMIT = 4_000
+
+
+class _GraphLabelsItem(QGraphicsItem):
+    """Paint all graph labels through one scene item instead of thousands."""
+
+    def __init__(self, labels: list[tuple[float, float, str]], bounds: QRectF) -> None:
+        super().__init__()
+        self._labels = labels
+        self._bounds = bounds.adjusted(-80.0, -40.0, 80.0, 40.0)
+        self.setZValue(4)
+
+    def boundingRect(self) -> QRectF:  # noqa: N802
+        return self._bounds
+
+    def paint(self, painter: QPainter, option: Any, _widget: Any = None) -> None:
+        # A full FAB has thousands of equipment labels.  Keep the overview
+        # clean and draw them only after the user zooms in far enough to read.
+        transform = painter.worldTransform()
+        level = max(abs(transform.m11()), abs(transform.m22()))
+        if len(self._labels) > 500 and level < 0.72:
+            return
+        exposed = option.exposedRect.adjusted(-80.0, -30.0, 80.0, 30.0)
+        painter.setPen(QColor("#a9c0cb"))
+        painter.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
+        for x, y, label in self._labels:
+            if exposed.contains(QPointF(x, y)):
+                painter.drawText(QPointF(x - 35.0, y - 4.0), label)
+
+
+def _distance_to_segment(
+    point_x: float,
+    point_y: float,
+    first: tuple[float, float],
+    second: tuple[float, float],
+) -> float:
+    dx, dy = second[0] - first[0], second[1] - first[1]
+    length_squared = dx * dx + dy * dy
+    if length_squared <= 1e-12:
+        return math.hypot(point_x - first[0], point_y - first[1])
+    ratio = ((point_x - first[0]) * dx + (point_y - first[1]) * dy) / length_squared
+    ratio = max(0.0, min(1.0, ratio))
+    projection_x = first[0] + dx * ratio
+    projection_y = first[1] + dy * ratio
+    return math.hypot(point_x - projection_x, point_y - projection_y)
 
 
 def install_graph_interaction(view_class: type[QGraphicsView]) -> None:
@@ -196,13 +241,65 @@ def consolidate_curve_edges(graph: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def install_dark_graph_renderer(view_class: type[QGraphicsView]) -> None:
-    """Install the Workbench dark-theme directed graph renderer."""
+    """Install a batched Workbench renderer for large directed Rail graphs."""
+
+    def graph_edge_at(self, viewport_position: Any) -> int | None:
+        polylines = getattr(self, "_graph_edge_polylines", [])
+        bounds = getattr(self, "_graph_edge_bounds", [])
+        if not polylines:
+            return None
+        scene_point = self.mapToScene(viewport_position)
+        view_scale = max(abs(self.transform().m11()), abs(self.transform().m22()), 1e-6)
+        tolerance = 7.0 / view_scale
+        best_id: int | None = None
+        best_distance = tolerance
+        for edge_id, (polyline, edge_bounds) in enumerate(zip(polylines, bounds)):
+            if len(polyline) < 2:
+                continue
+            if not edge_bounds.adjusted(-tolerance, -tolerance, tolerance, tolerance).contains(scene_point):
+                continue
+            distance = min(
+                _distance_to_segment(scene_point.x(), scene_point.y(), first, second)
+                for first, second in zip(polyline, polyline[1:])
+            )
+            if distance <= best_distance:
+                best_id = edge_id
+                best_distance = distance
+        return best_id
+
+    def graph_edges_in_rect(self, scene_rect: QRectF) -> set[int]:
+        return {
+            edge_id
+            for edge_id, edge_bounds in enumerate(getattr(self, "_graph_edge_bounds", []))
+            if edge_bounds.intersects(scene_rect) or scene_rect.contains(edge_bounds)
+        }
+
+    def set_graph_selection(self, edge_ids: set[int]) -> None:
+        selection_item = getattr(self, "_graph_selection_item", None)
+        if selection_item is None:
+            return
+        highlight = QPainterPath()
+        polylines = getattr(self, "_graph_edge_polylines", [])
+        for edge_id in sorted(edge_ids):
+            if edge_id < 0 or edge_id >= len(polylines):
+                continue
+            points = polylines[edge_id]
+            if len(points) < 2:
+                continue
+            highlight.moveTo(*points[0])
+            for point_value in points[1:]:
+                highlight.lineTo(*point_value)
+        selection_item.setPath(highlight)
+
     def set_graph(self, graph: Optional[Dict[str, Any]]) -> None:
         self._white_canvas = False
         scene = self.scene()
         scene.clear()
+        self._graph_edge_polylines = []
+        self._graph_edge_bounds = []
+        self._graph_selection_item = None
         if not graph:
-            label = scene.addText("DXF 파일을 선택하면 변환된 방향성 Graph가 표시됩니다.")
+            label = scene.addText("DXF 또는 Rail 파일을 선택하면 방향성 Graph가 표시됩니다.")
             label.setDefaultTextColor(QColor("#78909d"))
             return
 
@@ -222,80 +319,178 @@ def install_dark_graph_renderer(view_class: type[QGraphicsView]) -> None:
         def raw_point(raw: Any) -> tuple[float, float]:
             return (float(raw[0]) - min_x) * scale, (float(raw[1]) - min_y) * scale
 
-        for edge_id, edge in enumerate(graph.get("edges", [])):
+        edges = graph.get("edges", [])
+        batch_edges = len(edges) > INTERACTIVE_EDGE_LIMIT
+        all_rails = QPainterPath()
+        all_arrows = QPainterPath()
+
+        for edge_id, edge in enumerate(edges):
             start_node, end_node = int(edge.get("start", -1)), int(edge.get("end", -1))
             if not (0 <= start_node < len(raw_nodes) and 0 <= end_node < len(raw_nodes)):
+                self._graph_edge_polylines.append([])
+                self._graph_edge_bounds.append(QRectF())
                 continue
             direction = edge.get("dir")
-            directed = isinstance(direction, list) and len(direction) == 2
+            directed = (
+                isinstance(direction, list)
+                and len(direction) == 2
+                and all(isinstance(value, int) for value in direction)
+            )
             source_id, target_id = (direction if directed else [start_node, end_node])
 
-            path = QPainterPath()
             geometry = edge.get("geometry")
             if isinstance(geometry, list) and len(geometry) >= 2:
-                path.moveTo(*raw_point(geometry[0]))
-                for raw in geometry[1:]:
-                    path.lineTo(*raw_point(raw))
+                polyline = [raw_point(raw) for raw in geometry]
             else:
-                path.moveTo(*point(start_node))
-                path.lineTo(*point(end_node))
+                polyline = [point(start_node), point(end_node)]
+            path = QPainterPath()
+            path.moveTo(*polyline[0])
+            for point_value in polyline[1:]:
+                path.lineTo(*point_value)
+            all_rails.addPath(path)
+            self._graph_edge_polylines.append(polyline)
+            self._graph_edge_bounds.append(path.boundingRect())
 
-            rail = QGraphicsPathItem(path)
-            rail.setPen(QPen(EDGE_COLOR, 2.6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
-            rail.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
-            rail.setData(0, "graph-edge")
-            rail.setZValue(1)
-            scene.addItem(rail)
+            if not batch_edges:
+                rail = QGraphicsPathItem(path)
+                rail.setPen(
+                    QPen(
+                        EDGE_COLOR,
+                        2.6,
+                        Qt.PenStyle.SolidLine,
+                        Qt.PenCapStyle.RoundCap,
+                        Qt.PenJoinStyle.RoundJoin,
+                    )
+                )
+                rail.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
+                rail.setData(0, "graph-edge")
+                rail.setData(1, edge_id)
+                rail.setZValue(1)
+                rail.setToolTip(
+                    f"Edge {edge_id}\n{start_node} - {end_node}\n{source_id} -> {target_id}"
+                    if directed
+                    else f"Edge {edge_id}\n방향 미결정"
+                )
+                scene.addItem(rail)
 
             if directed:
-                source_x, source_y = point(int(source_id))
-                target_x, target_y = point(int(target_id))
-                dx, dy = target_x - source_x, target_y - source_y
-                magnitude = math.hypot(dx, dy)
-                if magnitude > 0.1:
-                    ux, uy = dx / magnitude, dy / magnitude
-                    marker_x, marker_y = source_x + dx * 0.62, source_y + dy * 0.62
-                    arrow_size = min(10.0, max(5.5, magnitude * 0.30))
+                oriented = (
+                    list(reversed(polyline))
+                    if [int(source_id), int(target_id)] == [end_node, start_node]
+                    else polyline
+                )
+                segment_lengths = [
+                    math.dist(first, second)
+                    for first, second in zip(oriented, oriented[1:])
+                ]
+                total_length = sum(segment_lengths)
+                if total_length > 1.0:
+                    target_length = total_length * 0.62
+                    travelled = 0.0
+                    marker_x, marker_y = oriented[-1]
+                    ux, uy = 1.0, 0.0
+                    for (first, second), segment_length in zip(zip(oriented, oriented[1:]), segment_lengths):
+                        if segment_length <= 1e-9:
+                            continue
+                        if travelled + segment_length >= target_length:
+                            ratio = (target_length - travelled) / segment_length
+                            marker_x = first[0] + (second[0] - first[0]) * ratio
+                            marker_y = first[1] + (second[1] - first[1]) * ratio
+                            ux = (second[0] - first[0]) / segment_length
+                            uy = (second[1] - first[1]) / segment_length
+                            break
+                        travelled += segment_length
+                    arrow_size = min(6.0, max(2.5, total_length * 0.22))
                     wing = arrow_size * 0.62
                     base_x, base_y = marker_x - ux * arrow_size, marker_y - uy * arrow_size
-                    arrow = QPainterPath()
-                    arrow.moveTo(marker_x, marker_y)
-                    arrow.lineTo(base_x - uy * wing, base_y + ux * wing)
-                    arrow.moveTo(marker_x, marker_y)
-                    arrow.lineTo(base_x + uy * wing, base_y - ux * wing)
-                    arrow_item = QGraphicsPathItem(arrow)
-                    arrow_item.setPen(QPen(QColor("#43e4d3"), 2.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
-                    arrow_item.setZValue(3)
-                    scene.addItem(arrow_item)
+                    all_arrows.moveTo(marker_x, marker_y)
+                    all_arrows.lineTo(base_x - uy * wing, base_y + ux * wing)
+                    all_arrows.moveTo(marker_x, marker_y)
+                    all_arrows.lineTo(base_x + uy * wing, base_y - ux * wing)
 
-            rail.setToolTip(f"Edge {edge_id}\n{start_node} - {end_node}\n{source_id} -> {target_id}" if directed else f"Edge {edge_id}\n방향 미결정")
+        if batch_edges:
+            rail_batch = QGraphicsPathItem(all_rails)
+            rail_batch.setPen(
+                QPen(
+                    EDGE_COLOR,
+                    2.6,
+                    Qt.PenStyle.SolidLine,
+                    Qt.PenCapStyle.RoundCap,
+                    Qt.PenJoinStyle.RoundJoin,
+                )
+            )
+            rail_batch.setData(0, "graph-edge-batch")
+            rail_batch.setZValue(1)
+            scene.addItem(rail_batch)
 
+        if not all_arrows.isEmpty():
+            arrow_batch = QGraphicsPathItem(all_arrows)
+            arrow_batch.setPen(
+                QPen(
+                    QColor("#43e4d3"),
+                    1.45,
+                    Qt.PenStyle.SolidLine,
+                    Qt.PenCapStyle.RoundCap,
+                    Qt.PenJoinStyle.RoundJoin,
+                )
+            )
+            arrow_batch.setZValue(3)
+            scene.addItem(arrow_batch)
+
+        label_records: list[tuple[float, float, str]] = []
         for label in graph.get("metadata", {}).get("labels", []):
             try:
                 x = (float(label["x"]) - min_x) * scale
                 y = (float(label["y"]) - min_y) * scale
             except (KeyError, TypeError, ValueError):
                 continue
-            text = QGraphicsSimpleTextItem(str(label.get("text", "")))
-            text.setBrush(QColor("#a9c0cb"))
-            text.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
-            text.setPos(x - 35, y - 18)
-            text.setZValue(4)
-            scene.addItem(text)
+            label_text = str(label.get("text", ""))
+            if label_text:
+                label_records.append((x, y, label_text))
+        if label_records:
+            scene.addItem(_GraphLabelsItem(label_records, all_rails.boundingRect()))
 
         node_radius = 3.5 if len(raw_nodes) < 2000 else 2.1
-        for node_id in range(len(raw_nodes)):
-            x, y = point(node_id)
-            dot = QGraphicsEllipseItem(x - node_radius, y - node_radius, node_radius * 2, node_radius * 2)
-            dot.setBrush(QColor("#0b1b27"))
-            dot.setPen(QPen(QColor("#719bad"), 1))
-            dot.setZValue(2)
-            dot.setToolTip(f"Node {node_id}\n({raw_nodes[node_id][0]}, {raw_nodes[node_id][1]})")
-            scene.addItem(dot)
+        if len(raw_nodes) <= INTERACTIVE_NODE_LIMIT:
+            for node_id in range(len(raw_nodes)):
+                x, y = point(node_id)
+                dot = QGraphicsEllipseItem(x - node_radius, y - node_radius, node_radius * 2, node_radius * 2)
+                dot.setBrush(QColor("#0b1b27"))
+                dot.setPen(QPen(QColor("#719bad"), 1))
+                dot.setZValue(2)
+                dot.setToolTip(f"Node {node_id}\n({raw_nodes[node_id][0]}, {raw_nodes[node_id][1]})")
+                scene.addItem(dot)
+        else:
+            node_path = QPainterPath()
+            for node_id in range(len(raw_nodes)):
+                x, y = point(node_id)
+                node_path.addEllipse(x - node_radius, y - node_radius, node_radius * 2, node_radius * 2)
+            node_batch = QGraphicsPathItem(node_path)
+            node_batch.setBrush(QColor("#0b1b27"))
+            node_batch.setPen(QPen(QColor("#719bad"), 0.8))
+            node_batch.setZValue(2)
+            scene.addItem(node_batch)
+
+        selection_item = QGraphicsPathItem()
+        selection_item.setPen(
+            QPen(
+                EDGE_SELECTED_COLOR,
+                4.5,
+                Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap,
+                Qt.PenJoinStyle.RoundJoin,
+            )
+        )
+        selection_item.setZValue(5)
+        scene.addItem(selection_item)
+        self._graph_selection_item = selection_item
 
         bounds = scene.itemsBoundingRect().adjusted(-35, -35, 35, 35)
         scene.setSceneRect(bounds)
         self.resetTransform()
         self.fitInView(bounds, Qt.AspectRatioMode.KeepAspectRatio)
 
+    view_class.graph_edge_at = graph_edge_at
+    view_class.graph_edges_in_rect = graph_edges_in_rect
+    view_class.set_graph_selection = set_graph_selection
     view_class.set_graph = set_graph

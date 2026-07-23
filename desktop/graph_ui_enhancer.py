@@ -83,22 +83,34 @@ class GraphSelectionController(QObject):
         return super().eventFilter(watched, event)
 
     def _select_single(self, pos: QPoint) -> None:
-        item = self.view.itemAt(pos)
-        edge_id = _edge_id_from_item(item) if item else None
+        lookup = getattr(self.view, "graph_edge_at", None)
+        if callable(lookup):
+            edge_id = lookup(pos)
+        else:
+            item = self.view.itemAt(pos)
+            edge_id = _edge_id_from_item(item) if item else None
         self.selected_edges = {edge_id} if edge_id is not None else set()
         self.highlight()
 
     def _select_rect(self, viewport_rect: QRect) -> None:
         scene_rect = self.view.mapToScene(viewport_rect).boundingRect()
-        selected: set[int] = set()
-        for item in self.view.scene().items(scene_rect):
-            edge_id = _edge_id_from_item(item)
-            if edge_id is not None:
-                selected.add(edge_id)
+        lookup = getattr(self.view, "graph_edges_in_rect", None)
+        if callable(lookup):
+            selected = lookup(scene_rect)
+        else:
+            selected = set()
+            for item in self.view.scene().items(scene_rect):
+                edge_id = _edge_id_from_item(item)
+                if edge_id is not None:
+                    selected.add(edge_id)
         self.selected_edges = selected
         self.highlight()
 
     def highlight(self) -> None:
+        batch_highlight = getattr(self.view, "set_graph_selection", None)
+        if callable(batch_highlight):
+            batch_highlight(self.selected_edges)
+            return
         for item in self.view.scene().items():
             edge_id = _edge_id_from_item(item)
             if edge_id is None or not hasattr(item, "pen") or not hasattr(item, "setPen"):
