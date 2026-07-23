@@ -94,8 +94,7 @@ def _graph_edge_points(
         source, target = end, start
         reverse = True
     else:
-        source, target = start, end
-        reverse = False
+        raise IsaacSimExportError(f"Edge {edge_index}에 확정된 진행 방향이 없습니다.")
 
     raw_geometry = edge.get("geometry")
     if isinstance(raw_geometry, list) and len(raw_geometry) >= 2:
@@ -262,8 +261,10 @@ def _point_on_polyline(points: Sequence[Sequence[float]], distance_m: float) -> 
             yaw = math.atan2(float(end[1]) - float(start[1]), float(end[0]) - float(start[0]))
             return position, yaw
         remaining -= segment
-    start, end = points[-2], points[-1] if len(points) >= 2 else (points[-1], points[-1])
-    yaw = math.atan2(float(end[1]) - float(start[1]), float(end[0]) - float(start[0])) if len(points) >= 2 else 0.0
+    if len(points) < 2:
+        return [float(value) for value in points[-1]], 0.0
+    start, end = points[-2], points[-1]
+    yaw = math.atan2(float(end[1]) - float(start[1]), float(end[0]) - float(start[0]))
     return [float(value) for value in points[-1]], yaw
 
 
