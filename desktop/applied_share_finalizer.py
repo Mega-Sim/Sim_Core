@@ -16,6 +16,14 @@ _SUBSTRING_REPLACEMENTS = (
     ("시뮬레이션", "Simulation"),
 )
 
+_SCENE_TEXT_REPLACEMENTS = {
+    "Facility JSON을 연결하면 레이아웃이 표시됩니다.": "Connect a Facility JSON file to display the layout.",
+    "DXF 파일을 선택하면 변환된 방향성 Graph가 표시됩니다.": "Select a DXF file to display the converted directed graph.",
+    "DXF 또는 Rail 파일을 선택하면 방향성 Graph가 표시됩니다.": "Select a DXF or Rail file to display the directed graph.",
+    "표시할 Node가 없습니다.": "No nodes are available to display.",
+    "표시할 Node 좌표가 없습니다.": "No node coordinates are available to display.",
+}
+
 
 def _translate_remaining_text(text: str) -> str:
     translated = _translate_text(text)
@@ -35,14 +43,14 @@ def _translate_graphics_view(view: QGraphicsView) -> None:
                 item.setToolTip(_translate_remaining_text(tooltip))
         if hasattr(item, "toPlainText") and hasattr(item, "setPlainText"):
             text = item.toPlainText()
-            translated = _translate_remaining_text(text)
-            if translated != text:
-                item.setPlainText(translated)
+            replacement = _SCENE_TEXT_REPLACEMENTS.get(text)
+            if replacement is not None:
+                item.setPlainText(replacement)
         elif hasattr(item, "text") and hasattr(item, "setText"):
             text = item.text()
-            translated = _translate_remaining_text(text)
-            if translated != text:
-                item.setText(translated)
+            replacement = _SCENE_TEXT_REPLACEMENTS.get(text)
+            if replacement is not None:
+                item.setText(replacement)
 
 
 def _translate_remaining(root: QWidget) -> None:
