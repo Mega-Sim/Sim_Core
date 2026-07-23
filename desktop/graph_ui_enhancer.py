@@ -33,6 +33,12 @@ def _button(text: str) -> QPushButton:
     return widget
 
 
+def _fit_view(view: Any) -> None:
+    fit = getattr(view, "fit_graph_view", None)
+    if callable(fit):
+        fit()
+
+
 def _edge_id_from_item(item: Any) -> int | None:
     tooltip = item.toolTip() if hasattr(item, "toolTip") else ""
     match = _EDGE_RE.match(str(tooltip))
@@ -206,14 +212,17 @@ def _add_graph_toolbar(window: Any, module: Any) -> None:
     toolbar_widget = QWidget(parent)
     toolbar = QHBoxLayout(toolbar_widget)
     toolbar.setContentsMargins(0, 0, 0, 4)
-    help_label = QLabel("Edge 클릭 또는 빈 영역에서 드래그: 블록 선택")
+    help_label = QLabel("휠: 빠른 줌 · 휠클릭 드래그/Shift+좌클릭: 이동 · Home/0: 전체보기 · 좌클릭 드래그: Edge 선택")
     help_label.setObjectName("Muted")
+    fit_button = _button("◎  전체 보기")
     popup_button = _button("▣  그래프만 크게 보기")
     reverse_button = _button("⇄  선택 방향 반전")
+    fit_button.clicked.connect(lambda: _fit_view(view))
     popup_button.clicked.connect(lambda: _open_graph_popup(window, module))
     reverse_button.clicked.connect(controller.reverse_selected)
     toolbar.addWidget(help_label)
     toolbar.addStretch(1)
+    toolbar.addWidget(fit_button)
     toolbar.addWidget(reverse_button)
     toolbar.addWidget(popup_button)
     parent.layout().insertWidget(1, toolbar_widget)
@@ -236,13 +245,15 @@ def _open_graph_popup(window: Any, module: Any) -> None:
 
     top = QHBoxLayout()
     guide = QLabel(
-        "마우스 드래그로 Edge 블록 선택 · 클릭으로 단일 Edge 선택 · 선택 후 방향 반전"
+        "휠: 빠른 줌 · 휠클릭 드래그/Shift+좌클릭: 이동 · Home/0: 전체보기 · 좌클릭 드래그: Edge 선택"
     )
     guide.setObjectName("Muted")
+    fit = _button("◎  전체 보기")
     reverse = _button("⇄  선택 방향 반전")
     close = _button("닫기")
     top.addWidget(guide)
     top.addStretch(1)
+    top.addWidget(fit)
     top.addWidget(reverse)
     top.addWidget(close)
     layout.addLayout(top)
@@ -256,6 +267,7 @@ def _open_graph_popup(window: Any, module: Any) -> None:
     window._graph_popup = dialog
     window._graph_popup_view = popup_view
     window._graph_popup_controller = controller
+    fit.clicked.connect(lambda: _fit_view(popup_view))
     reverse.clicked.connect(controller.reverse_selected)
     close.clicked.connect(dialog.close)
     dialog.finished.connect(lambda _result: _clear_popup(window))
