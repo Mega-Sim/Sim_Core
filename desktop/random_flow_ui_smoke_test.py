@@ -1,4 +1,4 @@
-"""Offscreen smoke test for the random From-To heatmap UI binding."""
+"""Offscreen smoke test for Random From-To heatmap and path-bound vehicle UI."""
 
 from __future__ import annotations
 
@@ -68,7 +68,7 @@ def main() -> int:
 
         dialog = window._random_flow_dialog
         if dialog is None or not dialog.isVisible():
-            raise RuntimeError("LA static analysis popup did not open")
+            raise RuntimeError("LA analysis + vehicle popup did not open")
         view = dialog.findChild(FlowHeatmapView)
         if view is None:
             raise RuntimeError("flow heatmap canvas was not created")
@@ -90,12 +90,34 @@ def main() -> int:
         if len(station_items) != len(facility["stations"]):
             raise RuntimeError("flow heatmap did not render every Station")
 
+        if not view._edge_geometries:
+            raise RuntimeError("vehicle animation Edge centerline geometry was not built")
+        if not view._vehicle_states:
+            raise RuntimeError("vehicle animation preview fleet was not created")
+        if len(view._vehicle_states) > 300:
+            raise RuntimeError("vehicle animation preview exceeded the UI safety limit")
+        if not view.animation_running():
+            raise RuntimeError("vehicle centerline animation did not auto-start")
+
+        # Advance the preview briefly. Every visible vehicle item is positioned only
+        # through locate_route_pose(), which derives X/Y from its current Edge polyline.
+        local_loop = QEventLoop()
+        QTimer.singleShot(150, local_loop.quit)
+        local_loop.exec()
+        application.processEvents()
+        configured_items = [state.get("item") for state in view._vehicle_states]
+        if not any(item is not None and item.isVisible() for item in configured_items):
+            raise RuntimeError("no released vehicle became visible on the path network")
+
         dialog.close()
         window.close()
         application.processEvents()
         os.environ.pop("SIM_CORE_GENERATED_DIR", None)
 
-    print("random flow UI smoke: PASS (generation binding + green/red heatmap popup)")
+    print(
+        "random flow UI smoke: PASS "
+        "(generation + heatmap + path-bound vehicle centerline animation)"
+    )
     return 0
 
 
