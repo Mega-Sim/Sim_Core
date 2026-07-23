@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import math
+from bisect import bisect_left, bisect_right
 from collections import Counter, defaultdict, deque
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,7 +22,7 @@ import ezdxf
 
 
 CONVERTER_NAME = "sim-core-dxf-graph"
-CONVERTER_VERSION = "1.0.0"
+CONVERTER_VERSION = "2.0.0"
 SUPPORTED_ENTITY_TYPES = ("LINE", "ARC")
 MIN_CONTINUATION_DOT = -0.15
 
@@ -34,13 +35,41 @@ class DxfConversionError(ValueError):
 
 
 @dataclass(frozen=True)
+class DxfGeometry:
+    """One logical DXF rail entity.
+
+    ARC display points are deliberately kept inside one logical geometry.  The
+    previous pipeline expanded every ARC into topology edges and later opened
+    the DXF a second time to merge those edges again.  Keeping the source
+    entity intact removes both the temporary nodes and the second file parse.
+    """
+
+    geometry_type: str
+    start: Point
+    end: Point
+    points: tuple[Point, ...]
+    center: Point | None = None
+    sweep_degrees: float | None = None
+
+
+@dataclass(frozen=True)
 class DxfLoadResult:
-    segments: list[Segment]
+    geometries: list[DxfGeometry]
     selected_layers: list[str]
     available_geometry_layers: list[str]
     entity_counts: dict[str, int]
     ignored_entity_counts: dict[str, int]
     labels: list[dict[str, Any]]
+
+    @property
+    def segments(self) -> list[Segment]:
+        """Compatibility view used by the standalone segment-level tests/API."""
+
+        return [
+            (first, second)
+            for geometry in self.geometries
+            for first, second in zip(geometry.points, geometry.points[1:])
+        ]
 
 
 def _vector(start: Point, end: Point) -> Point:
@@ -98,6 +127,7 @@ def _split_segments_at_touching_endpoints(
     segments: Sequence[Segment],
     *,
     tolerance: float,
+    extra_endpoints: Iterable[Point] = (),
 ) -> list[Segment]:
     """Split a segment when another segment endpoint lies on its interior.
 
@@ -107,14 +137,53 @@ def _split_segments_at_touching_endpoints(
     independent direction and appear as an impossible dead-end.
     """
 
-    endpoints: list[Point] = []
-    for start, end in segments:
-        endpoints.extend((start, end))
+    # The former implementation compared every segment with every endpoint.
+    # A production FAB drawing can contain tens of thousands of ARC-generated
+    # segments, turning this stage into billions of geometric tests.  Keep the
+    # exact same point-on-segment test, but use two sorted spatial indexes to
+    # reduce each segment to endpoints inside its bounding box.
+    endpoints = list(
+        dict.fromkeys(
+            [point for segment in segments for point in segment]
+            + list(extra_endpoints)
+        )
+    )
+    endpoints_by_x = sorted(
+        range(len(endpoints)),
+        key=lambda index: (endpoints[index][0], endpoints[index][1]),
+    )
+    endpoints_by_y = sorted(
+        range(len(endpoints)),
+        key=lambda index: (endpoints[index][1], endpoints[index][0]),
+    )
+    x_values = [endpoints[index][0] for index in endpoints_by_x]
+    y_values = [endpoints[index][1] for index in endpoints_by_y]
 
     split_segments: list[Segment] = []
     for start, end in segments:
         cuts: list[tuple[float, Point]] = [(0.0, start), (1.0, end)]
-        for point in endpoints:
+        min_x = min(start[0], end[0]) - tolerance
+        max_x = max(start[0], end[0]) + tolerance
+        min_y = min(start[1], end[1]) - tolerance
+        max_y = max(start[1], end[1]) + tolerance
+
+        x_first = bisect_left(x_values, min_x)
+        x_last = bisect_right(x_values, max_x)
+        y_first = bisect_left(y_values, min_y)
+        y_last = bisect_right(y_values, max_y)
+
+        # Query the axis with fewer candidates, then apply the other bounding
+        # coordinate before the more expensive projection/distance test.  The
+        # final index sort preserves the original endpoint encounter order.
+        if x_last - x_first <= y_last - y_first:
+            candidate_indexes = endpoints_by_x[x_first:x_last]
+        else:
+            candidate_indexes = endpoints_by_y[y_first:y_last]
+
+        for endpoint_index in sorted(candidate_indexes):
+            point = endpoints[endpoint_index]
+            if not (min_x <= point[0] <= max_x and min_y <= point[1] <= max_y):
+                continue
             parameter = _point_on_segment_parameter(
                 point, start, end, tolerance=tolerance
             )
@@ -205,7 +274,7 @@ def load_dxf_geometry(
         raise DxfConversionError(f"DXF 파일을 읽을 수 없습니다: {error}") from error
 
     requested_layers = _normalized_layers(layers)
-    segments: list[Segment] = []
+    geometries: list[DxfGeometry] = []
     labels: list[dict[str, Any]] = []
     entity_counts: Counter[str] = Counter()
     ignored_counts: Counter[str] = Counter()
@@ -244,14 +313,36 @@ def load_dxf_geometry(
         if entity_type == "LINE":
             start = entity.dxf.start
             end = entity.dxf.end
-            segments.append(
-                ((float(start.x), float(start.y)), (float(end.x), float(end.y)))
+            start_point = float(start.x), float(start.y)
+            end_point = float(end.x), float(end.y)
+            geometries.append(
+                DxfGeometry(
+                    geometry_type="LINE",
+                    start=start_point,
+                    end=end_point,
+                    points=(start_point, end_point),
+                )
             )
         else:
-            points = _arc_points(entity, arc_segments)
-            segments.extend(zip(points, points[1:]))
+            points = tuple(_arc_points(entity, arc_segments))
+            center = entity.dxf.center
+            start_angle = float(entity.dxf.start_angle)
+            end_angle = float(entity.dxf.end_angle)
+            sweep_degrees = end_angle - start_angle
+            if sweep_degrees <= 0:
+                sweep_degrees += 360.0
+            geometries.append(
+                DxfGeometry(
+                    geometry_type="ARC",
+                    start=points[0],
+                    end=points[-1],
+                    points=points,
+                    center=(float(center.x), float(center.y)),
+                    sweep_degrees=sweep_degrees,
+                )
+            )
 
-    if not segments:
+    if not geometries:
         available = ", ".join(sorted(available_layers, key=str.casefold)) or "없음"
         requested = ", ".join(layers or []) or "전체"
         raise DxfConversionError(
@@ -260,7 +351,7 @@ def load_dxf_geometry(
         )
 
     return DxfLoadResult(
-        segments=segments,
+        geometries=geometries,
         selected_layers=sorted(selected_layers, key=str.casefold),
         available_geometry_layers=sorted(available_layers, key=str.casefold),
         entity_counts=dict(sorted(entity_counts.items())),
@@ -331,6 +422,217 @@ def build_nodes_edges(
     return nodes, edges
 
 
+def build_rail_nodes_edges(
+    geometries: Sequence[DxfGeometry],
+    *,
+    coordinate_precision: int = 3,
+) -> tuple[list[list[float]], list[dict[str, Any]]]:
+    """Build topology directly from logical LINE/ARC entities.
+
+    LINE entities are still split when another entity endpoint touches their
+    interior, because that point is a real branch/merge node.  ARC sampling is
+    retained only as display geometry; the samples never become graph nodes or
+    temporary edges.
+    """
+
+    if coordinate_precision < 0 or coordinate_precision > 9:
+        raise DxfConversionError("좌표 반올림 자릿수는 0~9 범위여야 합니다.")
+
+    def clean(value: float) -> float:
+        result = round(float(value), coordinate_precision)
+        return 0.0 if result == 0 else result
+
+    node_map: dict[Point, int] = {}
+    nodes: list[list[float]] = []
+    edges: list[dict[str, Any]] = []
+
+    def get_node(point: Point) -> int:
+        key = clean(point[0]), clean(point[1])
+        node_id = node_map.get(key)
+        if node_id is None:
+            node_id = len(nodes)
+            node_map[key] = node_id
+            nodes.append([key[0], key[1]])
+        return node_id
+
+    line_segments = [
+        (geometry.start, geometry.end)
+        for geometry in geometries
+        if geometry.geometry_type == "LINE"
+    ]
+    all_entity_endpoints = [
+        point
+        for geometry in geometries
+        for point in (geometry.start, geometry.end)
+    ]
+    snap_tolerance = 10 ** (-coordinate_precision)
+    normalized_lines = _split_segments_at_touching_endpoints(
+        line_segments,
+        tolerance=snap_tolerance,
+        extra_endpoints=all_entity_endpoints,
+    )
+
+    for start, end in normalized_lines:
+        start_node = get_node(start)
+        end_node = get_node(end)
+        if start_node == end_node:
+            continue
+        edges.append(
+            {
+                "start": start_node,
+                "end": end_node,
+                "dir": None,
+                "geometry": [nodes[start_node], nodes[end_node]],
+            }
+        )
+
+    unique_endpoints = list(dict.fromkeys(all_entity_endpoints))
+    endpoints_by_x = sorted(
+        range(len(unique_endpoints)),
+        key=lambda index: (unique_endpoints[index][0], unique_endpoints[index][1]),
+    )
+    endpoints_by_y = sorted(
+        range(len(unique_endpoints)),
+        key=lambda index: (unique_endpoints[index][1], unique_endpoints[index][0]),
+    )
+    x_values = [unique_endpoints[index][0] for index in endpoints_by_x]
+    y_values = [unique_endpoints[index][1] for index in endpoints_by_y]
+
+    for source_index, geometry in enumerate(geometries):
+        if geometry.geometry_type != "ARC":
+            continue
+        if geometry.center is None or geometry.sweep_degrees is None:
+            continue
+        center_x, center_y = geometry.center
+        radius = _distance(geometry.start, geometry.center)
+        if radius <= snap_tolerance:
+            continue
+        start_angle = math.atan2(
+            geometry.start[1] - center_y,
+            geometry.start[0] - center_x,
+        )
+        total_sweep = math.radians(geometry.sweep_degrees)
+        radial_tolerance = max(snap_tolerance * 2.0, 1e-7)
+        angular_tolerance = radial_tolerance / radius
+        min_x, max_x = center_x - radius - radial_tolerance, center_x + radius + radial_tolerance
+        min_y, max_y = center_y - radius - radial_tolerance, center_y + radius + radial_tolerance
+        x_first, x_last = bisect_left(x_values, min_x), bisect_right(x_values, max_x)
+        y_first, y_last = bisect_left(y_values, min_y), bisect_right(y_values, max_y)
+        candidate_indexes = (
+            endpoints_by_x[x_first:x_last]
+            if x_last - x_first <= y_last - y_first
+            else endpoints_by_y[y_first:y_last]
+        )
+        cuts: list[tuple[float, Point]] = [
+            (0.0, geometry.start),
+            (total_sweep, geometry.end),
+        ]
+        for endpoint_index in candidate_indexes:
+            candidate = unique_endpoints[endpoint_index]
+            if not (min_x <= candidate[0] <= max_x and min_y <= candidate[1] <= max_y):
+                continue
+            if abs(_distance(candidate, geometry.center) - radius) > radial_tolerance:
+                continue
+            candidate_angle = math.atan2(candidate[1] - center_y, candidate[0] - center_x)
+            parameter = (candidate_angle - start_angle) % (2.0 * math.pi)
+            if angular_tolerance < parameter < total_sweep - angular_tolerance:
+                cuts.append((parameter, candidate))
+        cuts.sort(key=lambda item: item[0])
+        deduplicated_cuts: list[tuple[float, Point]] = []
+        for parameter, candidate in cuts:
+            if deduplicated_cuts and abs(parameter - deduplicated_cuts[-1][0]) <= angular_tolerance:
+                continue
+            deduplicated_cuts.append((parameter, candidate))
+
+        source_segments = max(1, len(geometry.points) - 1)
+        for (first_parameter, first_point), (second_parameter, second_point) in zip(
+            deduplicated_cuts,
+            deduplicated_cuts[1:],
+        ):
+            sub_sweep = second_parameter - first_parameter
+            if sub_sweep <= angular_tolerance:
+                continue
+            start_node = get_node(first_point)
+            end_node = get_node(second_point)
+            if start_node == end_node:
+                continue
+            step_count = max(2, int(math.ceil(source_segments * sub_sweep / total_sweep)))
+            display_geometry = [
+                [
+                    clean(
+                        center_x
+                        + radius
+                        * math.cos(
+                            start_angle
+                            + first_parameter
+                            + sub_sweep * index / step_count
+                        )
+                    ),
+                    clean(
+                        center_y
+                        + radius
+                        * math.sin(
+                            start_angle
+                            + first_parameter
+                            + sub_sweep * index / step_count
+                        )
+                    ),
+                ]
+                for index in range(step_count + 1)
+            ]
+            display_geometry[0] = nodes[start_node]
+            display_geometry[-1] = nodes[end_node]
+            edges.append(
+                {
+                    "start": start_node,
+                    "end": end_node,
+                    "dir": None,
+                    "geometry": display_geometry,
+                    "geometry_type": "ARC",
+                    "source_edge_count": step_count,
+                    "source_arc_group": source_index,
+                    "arc_center": [clean(center_x), clean(center_y)],
+                    "arc_sweep_degrees": math.degrees(sub_sweep),
+                }
+            )
+
+    if not edges:
+        raise DxfConversionError("좌표 반올림 후 유효한 Rail Edge가 남지 않았습니다.")
+    return nodes, edges
+
+
+def _edge_travel_vector(
+    edge: dict[str, Any],
+    nodes: Sequence[Sequence[float]],
+    source_node: int,
+    target_node: int,
+    *,
+    arrival: bool,
+) -> Point:
+    """Return the local tangent for travel through an edge endpoint."""
+
+    geometry = edge.get("geometry")
+    if isinstance(geometry, list) and len(geometry) >= 2:
+        forward = (
+            int(edge["start"]) == source_node
+            and int(edge["end"]) == target_node
+        )
+        points = geometry if forward else reversed(geometry)
+        oriented = list(points)
+        if arrival:
+            first, second = oriented[-2], oriented[-1]
+        else:
+            first, second = oriented[0], oriented[1]
+        return _vector(
+            (float(first[0]), float(first[1])),
+            (float(second[0]), float(second[1])),
+        )
+    return _vector(
+        (float(nodes[source_node][0]), float(nodes[source_node][1])),
+        (float(nodes[target_node][0]), float(nodes[target_node][1])),
+    )
+
+
 def build_directed_graph(
     nodes: Sequence[Sequence[float]],
     edges: Sequence[dict[str, Any]],
@@ -350,12 +652,16 @@ def build_directed_graph(
         node_edges[int(edge["end"])].append(edge_id)
 
     thread_count = 0
-    while True:
-        seed = next(
-            (index for index, edge in enumerate(directed) if edge["dir"] is None), None
-        )
-        if seed is None:
+    next_seed = 0
+    while next_seed < len(directed):
+        # Resume where the previous scan stopped.  Restarting enumerate() at
+        # edge 0 made drawings with many disconnected spans quadratic even
+        # after the geometry stage had completed.
+        while next_seed < len(directed) and directed[next_seed]["dir"] is not None:
+            next_seed += 1
+        if next_seed >= len(directed):
             break
+        seed = next_seed
         thread_count += 1
         seed_edge = directed[seed]
         seed_edge["dir"] = [int(seed_edge["start"]), int(seed_edge["end"])]
@@ -368,7 +674,13 @@ def build_directed_graph(
             if direction is None:
                 continue
             start_node, end_node = int(direction[0]), int(direction[1])
-            previous = _vector(tuple(nodes[start_node]), tuple(nodes[end_node]))  # type: ignore[arg-type]
+            previous = _edge_travel_vector(
+                edge,
+                nodes,
+                start_node,
+                end_node,
+                arrival=True,
+            )
             candidates = [
                 candidate
                 for candidate in node_edges[end_node]
@@ -384,7 +696,13 @@ def build_directed_graph(
                     pair = [int(next_edge["start"]), int(next_edge["end"])]
                 else:
                     pair = [int(next_edge["end"]), int(next_edge["start"])]
-                vector = _vector(tuple(nodes[pair[0]]), tuple(nodes[pair[1]]))  # type: ignore[arg-type]
+                vector = _edge_travel_vector(
+                    next_edge,
+                    nodes,
+                    pair[0],
+                    pair[1],
+                    arrival=False,
+                )
                 score = _dot(_normalize(previous), _normalize(vector))
                 ranked.append((score, candidate, pair, vector))
 
@@ -576,8 +894,8 @@ def convert_dxf_to_graph(
         raise DxfConversionError("현재 변환기는 DXF 파일만 지원합니다.")
 
     loaded = load_dxf_geometry(path, layers=layers, arc_segments=arc_segments)
-    nodes, source_edges = build_nodes_edges(
-        loaded.segments,
+    nodes, source_edges = build_rail_nodes_edges(
+        loaded.geometries,
         coordinate_precision=coordinate_precision,
     )
     directed_edges, thread_count = build_directed_graph(nodes, source_edges)
@@ -595,8 +913,10 @@ def convert_dxf_to_graph(
             "labels": loaded.labels,
             "arc_segments": arc_segments,
             "coordinate_precision": coordinate_precision,
+            "intermediate_format": "rail-geometry",
+            "pm_generation": "deferred",
             "direction_inference": {
-                "method": "thread-continuity-dot-product",
+                "method": "rail-thread-continuity-local-tangent",
                 "authoritative": False,
                 "review_required": True,
             },
@@ -607,6 +927,12 @@ def convert_dxf_to_graph(
                 "direction_thread_count": thread_count,
                 "unresolved_direction_count": sum(
                     1 for edge in directed_edges if edge["dir"] is None
+                ),
+                "line_count": sum(
+                    1 for edge in directed_edges if edge.get("geometry_type", "LINE") == "LINE"
+                ),
+                "curve_count": sum(
+                    1 for edge in directed_edges if edge.get("geometry_type") == "ARC"
                 ),
             },
             "converter": {

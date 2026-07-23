@@ -7,11 +7,14 @@ import math
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import ezdxf
 
+import dxf_graph_converter
 from dxf_graph_converter import (
     DxfConversionError,
+    build_nodes_edges,
     convert_dxf_to_graph,
     load_dxf_lines,
     save_graph,
@@ -52,13 +55,17 @@ class DxfGraphConverterTest(unittest.TestCase):
             )
 
         statistics = graph["metadata"]["statistics"]
-        self.assertEqual(statistics["node_count"], 15)
-        self.assertEqual(statistics["edge_count"], 13)
+        self.assertEqual(statistics["node_count"], 6)
+        self.assertEqual(statistics["edge_count"], 4)
         self.assertEqual(statistics["component_count"], 2)
         self.assertEqual(statistics["unresolved_direction_count"], 0)
         self.assertEqual(graph["metadata"]["selected_layers"], ["OHT_RAIL_CENTER"])
         self.assertTrue(all(edge["dir"] is not None for edge in graph["edges"]))
         self.assertEqual(graph["metadata"]["labels"][0]["text"], "EQ-01")
+        arc_edges = [edge for edge in graph["edges"] if edge.get("geometry_type") == "ARC"]
+        self.assertEqual(len(arc_edges), 1)
+        self.assertEqual(len(arc_edges[0]["geometry"]), 11)
+        self.assertEqual(arc_edges[0]["source_edge_count"], 10)
 
     def test_degree_two_midpoints_keep_one_in_and_one_out(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -111,6 +118,47 @@ class DxfGraphConverterTest(unittest.TestCase):
         incoming = sum(1 for index in linked_edges if graph["edges"][index]["dir"][1] == junction)
         self.assertGreater(outgoing, 0)
         self.assertGreater(incoming, 0)
+
+    def test_touching_endpoint_splits_arc_only_at_real_junction(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "arc-branch-layout.dxf"
+            document = ezdxf.new("R2013")
+            model = document.modelspace()
+            model.add_arc(center=(0, 0), radius=10, start_angle=0, end_angle=90)
+            branch = math.sqrt(50.0)
+            model.add_line((branch, branch), (branch + 5, branch + 5))
+            document.saveas(path)
+            graph = convert_dxf_to_graph(path)
+
+        junction = graph["nodes"].index([7.071, 7.071])
+        incident = [
+            edge
+            for edge in graph["edges"]
+            if junction in (edge["start"], edge["end"])
+        ]
+        arc_edges = [edge for edge in graph["edges"] if edge.get("geometry_type") == "ARC"]
+        self.assertEqual(len(incident), 3)
+        self.assertEqual(len(arc_edges), 2)
+        self.assertEqual(len({edge["source_arc_group"] for edge in arc_edges}), 1)
+
+    def test_touching_endpoint_spatial_index_prunes_distant_candidates(self) -> None:
+        segment_count = 2000
+        segments = [
+            ((float(index * 100), 0.0), (float(index * 100 + 10), 0.0))
+            for index in range(segment_count)
+        ]
+
+        original = dxf_graph_converter._point_on_segment_parameter
+        with patch.object(
+            dxf_graph_converter,
+            "_point_on_segment_parameter",
+            wraps=original,
+        ) as point_test:
+            nodes, edges = build_nodes_edges(segments)
+
+        self.assertEqual(len(nodes), segment_count * 2)
+        self.assertEqual(len(edges), segment_count)
+        self.assertLess(point_test.call_count, segment_count * 5)
 
     def test_forward_branch_continues_from_one_seed_thread(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -170,6 +218,47 @@ class DxfGraphConverterTest(unittest.TestCase):
             payload["metadata"]["converter"]["reference_repository"],
             "Mega-Sim/Graph_Maker_CAD-dxf-_to_json",
         )
+
+    def test_conversion_reads_dxf_once_and_keeps_arc_logical(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = self.make_layout(Path(temporary))
+            original = dxf_graph_converter.ezdxf.readfile
+            with patch.object(dxf_graph_converter.ezdxf, "readfile", wraps=original) as readfile:
+                graph = convert_dxf_to_graph(source)
+
+        self.assertEqual(readfile.call_count, 1)
+        self.assertEqual(
+            sum(1 for edge in graph["edges"] if edge.get("geometry_type") == "ARC"),
+            1,
+        )
+
+    def test_linear_analyzer_reference_layout_uses_logical_rail_edges(self) -> None:
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "development_src"
+            / "Linear_Analyzer"
+            / "SemiLA"
+            / "Encoded_190519_P2L_7F_FAB_ Layout_Text_Lower_final.dxf"
+        )
+        self.assertTrue(source.is_file(), source)
+
+        graph = convert_dxf_to_graph(source)
+        statistics = graph["metadata"]["statistics"]
+        self.assertEqual(graph["metadata"]["entity_counts"]["ARC"], 2981)
+        self.assertEqual(
+            len(
+                {
+                    edge["source_arc_group"]
+                    for edge in graph["edges"]
+                    if edge.get("geometry_type") == "ARC"
+                }
+            ),
+            2981,
+        )
+        self.assertGreaterEqual(statistics["curve_count"], 2981)
+        self.assertLess(statistics["edge_count"], 15_000)
+        self.assertLess(statistics["node_count"], 15_000)
+        self.assertEqual(graph["metadata"]["intermediate_format"], "rail-geometry")
 
 
 if __name__ == "__main__":
