@@ -6,7 +6,11 @@ import copy
 import unittest
 
 from cad_graph_facility import CadGraphFacilityError, build_facility_from_cad_graph
+from cad_station_label_compat import install_cad_station_label_compat
 from random_flow_analysis import generate_random_workload
+
+
+install_cad_station_label_compat()
 
 
 def _graph(*, direction: list[int] | None = None) -> dict:
@@ -94,6 +98,24 @@ class CadGraphFacilityTests(unittest.TestCase):
 
         self.assertEqual(stations["station-1"]["position_um"]["y"], 0)
         self.assertEqual(stations["station-1"]["position_um"]["x"], 25_000)
+
+    def test_repeated_equipment_code_family_becomes_stations(self) -> None:
+        graph = copy.deepcopy(_graph())
+        graph["metadata"]["labels"] = [
+            {
+                "text": f"A_{index}",
+                "x": index * 8,
+                "y": 2 if index % 2 else -2,
+                "layer": "RJE_TEXT_OB",
+            }
+            for index in range(1, 11)
+        ] + [{"text": "NOTE", "x": 50, "y": 20, "layer": "RJE_TEXT_OB"}]
+
+        facility = build_facility_from_cad_graph(graph)
+        station_ids = {station["id"] for station in facility["stations"]}
+
+        self.assertEqual(station_ids, {f"A_{index}" for index in range(1, 11)})
+        self.assertEqual(len(facility["stations"]), 10)
 
     def test_requires_two_station_labels_and_never_falls_back_to_sample(self) -> None:
         graph = copy.deepcopy(_graph())
