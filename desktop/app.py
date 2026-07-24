@@ -5,6 +5,7 @@ import sys
 
 import app_base as base
 from automod_modeling_patch import install_automod_modeling
+from cad_station_label_compat import install_cad_station_label_compat
 from english_ui_patch import install_english_ui
 from graph_enhancer_compat import install_compatible_enhancements
 from graph_render_optimization import install_fast_graph_renderer
@@ -16,6 +17,11 @@ from layout_static_analysis_patch import install_layout_static_analysis
 from pan_fix import install_bidirectional_pan
 from rail_static_analysis_compat import install_rail_compat
 
+
+# Production FAB drawings often use A_#### equipment codes rather than explicit
+# station-* labels. Install the compatible detector and fast rail projection
+# before any Layout analysis can build a Facility from the displayed CAD graph.
+install_cad_station_label_compat()
 
 # Preserve the high-speed graph renderer from main.
 install_graph_interaction(base.NetworkView)
