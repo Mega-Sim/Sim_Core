@@ -17,6 +17,7 @@ from layout_static_analysis_patch import install_layout_static_analysis
 from layout_static_preview_patch import install_layout_static_preview
 from pan_fix import install_bidirectional_pan
 from rail_static_analysis_compat import install_rail_compat
+from vehicle_simulation_patch import install_vehicle_simulation
 
 
 # Production FAB drawings often use A_#### equipment codes rather than explicit
@@ -31,10 +32,12 @@ install_fast_graph_renderer(base.NetworkView)
 install_bidirectional_pan(base.NetworkView)
 
 # Layer optional feature patches on the current workbench without replacing
-# app_base: Rail/DXF support, Layout static analysis, AutoMod and Isaac export.
+# app_base: Rail/DXF support, Layout static analysis, Vehicle animation,
+# AutoMod and Isaac export.
 install_rail_compat(base)
 install_layout_static_analysis(base)
 install_layout_static_preview(base)
+install_vehicle_simulation(base)
 install_automod_modeling(base)
 install_isaac_sim_modeling(base)
 
