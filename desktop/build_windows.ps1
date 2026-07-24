@@ -40,6 +40,10 @@ if ($LASTEXITCODE -ne 0) {
 if ($LASTEXITCODE -ne 0) {
     throw "AutoMod model.arc converter tests failed."
 }
+& $Python desktop\test_isaac_sim_exporter.py
+if ($LASTEXITCODE -ne 0) {
+    throw "NVIDIA Isaac Sim exporter tests failed."
+}
 
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release --parallel
