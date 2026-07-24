@@ -32,12 +32,10 @@ install_fast_graph_renderer(base.NetworkView)
 install_bidirectional_pan(base.NetworkView)
 
 # Layer optional feature patches on the current workbench without replacing
-# app_base: Rail/DXF support, Layout static analysis, Vehicle animation,
-# AutoMod and Isaac export.
+# app_base: Rail/DXF support, Layout static analysis, AutoMod and Isaac export.
 install_rail_compat(base)
 install_layout_static_analysis(base)
 install_layout_static_preview(base)
-install_vehicle_simulation(base)
 install_automod_modeling(base)
 install_isaac_sim_modeling(base)
 
@@ -47,9 +45,10 @@ NetworkView = base.NetworkView
 # Graph toolbar, enlarged popup, block selection and direction reversal.
 install_compatible_enhancements(sys.modules[__name__])
 
-# Apply the final input-page presentation pass after every feature has added
-# its controls, so Layout/CAD panels stay compact without changing behavior.
+# Compact the established input panels first, then add the Vehicle Simulation
+# controls below the compact row so both layouts cannot occupy the same cells.
 install_input_ui_compact(base)
+install_vehicle_simulation(base)
 
 # English-only branch: extend translation coverage for the Isaac Sim workflow,
 # then translate all user-facing Qt text and apply the dedicated app icon.
