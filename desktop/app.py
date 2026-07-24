@@ -14,6 +14,7 @@ from input_ui_compact_patch import install_input_ui_compact
 from isaac_sim_english_patch import install_isaac_sim_english
 from isaac_sim_modeling_patch import install_isaac_sim_modeling
 from layout_static_analysis_patch import install_layout_static_analysis
+from layout_static_preview_patch import install_layout_static_preview
 from pan_fix import install_bidirectional_pan
 from rail_static_analysis_compat import install_rail_compat
 
@@ -33,6 +34,7 @@ install_bidirectional_pan(base.NetworkView)
 # app_base: Rail/DXF support, Layout static analysis, AutoMod and Isaac export.
 install_rail_compat(base)
 install_layout_static_analysis(base)
+install_layout_static_preview(base)
 install_automod_modeling(base)
 install_isaac_sim_modeling(base)
 
