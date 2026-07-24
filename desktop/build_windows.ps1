@@ -32,6 +32,10 @@ if ($LASTEXITCODE -ne 0 -or -not (Test-Path $AppIcon)) {
 if ($LASTEXITCODE -ne 0) {
     throw "DXF graph converter tests failed."
 }
+& $Python desktop\test_cad_graph_facility.py
+if ($LASTEXITCODE -ne 0) {
+    throw "CAD graph Facility adapter tests failed."
+}
 & $Python desktop\test_rail_file.py
 if ($LASTEXITCODE -ne 0) {
     throw "Rail file adapter tests failed."
