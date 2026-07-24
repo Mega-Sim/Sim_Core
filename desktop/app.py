@@ -17,6 +17,7 @@ from layout_static_analysis_patch import install_layout_static_analysis
 from layout_static_preview_patch import install_layout_static_preview
 from pan_fix import install_bidirectional_pan
 from rail_static_analysis_compat import install_rail_compat
+from vehicle_simulation_english_patch import install_vehicle_simulation_english
 from vehicle_simulation_patch import install_vehicle_simulation
 
 
@@ -50,9 +51,10 @@ install_compatible_enhancements(sys.modules[__name__])
 install_input_ui_compact(base)
 install_vehicle_simulation(base)
 
-# English-only branch: extend translation coverage for the Isaac Sim workflow,
-# then translate all user-facing Qt text and apply the dedicated app icon.
+# English-only branch: extend translation coverage for the Isaac Sim and
+# Vehicle Simulation workflows, then translate all user-facing Qt text.
 install_isaac_sim_english()
+install_vehicle_simulation_english()
 install_english_ui(base)
 
 
