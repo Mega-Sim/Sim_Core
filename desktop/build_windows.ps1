@@ -20,7 +20,7 @@ $Python = if (Get-Command python -ErrorAction SilentlyContinue) {
 & $Python -m pip install -r desktop\requirements.txt
 & $Python -m pip install pillow
 
-# Generate the dedicated Sim_Core icon used by the Windows executable. The
+# Generate the dedicated Sim_Core icon used by the Windows executable.  The
 # runtime window icon is drawn by english_ui_patch.py from the same design.
 $env:QT_QPA_PLATFORM = "offscreen"
 & $Python desktop\generate_app_icon.py
