@@ -11,6 +11,7 @@ permissions:
 jobs:
   build-windows:
     runs-on: windows-latest
+    timeout-minutes: 90
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -18,24 +19,12 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
-      - name: Install Python dependencies
+      - name: Build Core and Windows executable
         shell: pwsh
         run: |
-          python -m pip install --upgrade pip
-          if (Test-Path "desktop/requirements.txt") {
-            python -m pip install -r desktop/requirements.txt
-          }
-          python -m pip install PySide6 ezdxf pyinstaller
-
-      - name: Build Sim_Core Flow Workbench EXE
-        shell: pwsh
-        run: |
-          pyinstaller --noconfirm --clean --onefile --windowed `
-            --name Sim_Core_Flow_Workbench `
-            --paths desktop `
-            desktop/app.py
+          & "$PWD\desktop\build_windows.ps1"
 
       - name: Prepare package
         shell: pwsh
@@ -51,5 +40,3 @@ jobs:
           path: package/
           if-no-files-found: error
           retention-days: 30
-
-# Rebuild marker: latest graph interaction and curve-edge changes
