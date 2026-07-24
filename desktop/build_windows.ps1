@@ -36,6 +36,18 @@ if ($LASTEXITCODE -ne 0) {
 if ($LASTEXITCODE -ne 0) {
     throw "CAD graph Facility adapter tests failed."
 }
+& $Python desktop\test_vehicle_simulation_engine.py
+if ($LASTEXITCODE -ne 0) {
+    throw "Vehicle simulation engine tests failed."
+}
+& $Python desktop\test_vehicle_simulation_drawing1.py
+if ($LASTEXITCODE -ne 0) {
+    throw "Drawing1 vehicle simulation integration test failed."
+}
+& $Python desktop\test_vehicle_simulation_ui.py
+if ($LASTEXITCODE -ne 0) {
+    throw "Vehicle simulation Qt UI tests failed."
+}
 & $Python desktop\test_rail_file.py
 if ($LASTEXITCODE -ne 0) {
     throw "Rail file adapter tests failed."

@@ -57,6 +57,13 @@ def main() -> int:
         if not window.cad_graph_view.scene().items():
             raise RuntimeError("DXF graph preview did not render")
 
+    # Selecting CAD intentionally clears Scenario and demand artifacts belonging to
+    # the previous Facility. Reconnect the sample before exercising the Core path;
+    # otherwise run_core opens an input-required modal dialog in offscreen CI.
+    window.load_sample()
+    if not window.facility_path or not window.scenario_path or not window.demand_path:
+        raise RuntimeError("cross-domain sample inputs were not restored after CAD test")
+
     result = {"exit_code": None, "timed_out": False}
 
     def stop_on_timeout() -> None:
