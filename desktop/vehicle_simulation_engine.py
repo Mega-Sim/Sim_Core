@@ -154,19 +154,6 @@ class VisualVehicleSimulation:
         if len(station_ids) < 2:
             raise RandomFlowError("2D Vehicle Simulation에는 Station이 2개 이상 필요합니다.")
 
-        count = int(vehicle_count)
-        self.vehicles: dict[str, _VehicleRuntime] = {}
-        for index in range(count):
-            station_id = station_ids[index % len(station_ids)]
-            x_um, y_um = self.station_positions[station_id]
-            vehicle_id = f"SIM-OHT-{index + 1:03d}"
-            self.vehicles[vehicle_id] = _VehicleRuntime(
-                vehicle_id=vehicle_id,
-                current_station_id=station_id,
-                x_um=x_um,
-                y_um=y_um,
-            )
-
         self.jobs: dict[str, _JobRuntime] = {}
         raw_jobs = scenario.get("jobs", [])
         if not isinstance(raw_jobs, list) or not raw_jobs:
@@ -187,6 +174,42 @@ class VisualVehicleSimulation:
             )
         if not self.jobs:
             raise RandomFlowError("실행 가능한 Job이 없습니다.")
+
+        # Choose one deterministic home station that can reach the greatest number
+        # of generated pickup stations. Placing the initial fleet there makes the
+        # first Job visibly travel to Pickup instead of starting every vehicle on
+        # its own source station, while still preferring a dispatchable one-way
+        # location such as the upstream end of a directed line.
+        pickup_ids = sorted({job.pickup_station_id for job in self.jobs.values()})
+        home_candidates: list[tuple[int, int, int, str]] = []
+        for candidate in station_ids:
+            reachable_count = 0
+            nonzero_count = 0
+            total_travel_time = 0
+            for pickup_id in pickup_ids:
+                route = self.router.route_stations(candidate, pickup_id)
+                if route is None:
+                    continue
+                reachable_count += 1
+                if route.edge_ids:
+                    nonzero_count += 1
+                    total_travel_time += int(route.travel_time_us)
+            home_candidates.append(
+                (-reachable_count, -nonzero_count, -total_travel_time, candidate)
+            )
+        home_station_id = min(home_candidates)[3]
+
+        count = int(vehicle_count)
+        home_x_um, home_y_um = self.station_positions[home_station_id]
+        self.vehicles: dict[str, _VehicleRuntime] = {}
+        for index in range(count):
+            vehicle_id = f"SIM-OHT-{index + 1:03d}"
+            self.vehicles[vehicle_id] = _VehicleRuntime(
+                vehicle_id=vehicle_id,
+                current_station_id=home_station_id,
+                x_um=home_x_um,
+                y_um=home_y_um,
+            )
 
         self._record("SIMULATION_READY", "", "", f"vehicles={len(self.vehicles)}")
 
