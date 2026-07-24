@@ -9,6 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication
 
 import app
+import app_base as base
 from vehicle_simulation_patch import VehicleSimulationDialog
 
 
@@ -90,7 +91,7 @@ class VehicleSimulationUiTests(unittest.TestCase):
 
         dialog = VehicleSimulationDialog(
             window,
-            app,
+            base,
             _facility(),
             _scenario(),
             None,
