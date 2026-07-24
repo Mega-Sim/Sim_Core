@@ -2,9 +2,8 @@ name: Build Windows Desktop EXE
 
 on:
   push:
-    branches:
-      - main
-      - 'feature/6차-다차량-DES-2D-애니메이션'
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
 
 permissions:
