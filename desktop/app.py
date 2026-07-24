@@ -5,6 +5,7 @@ import sys
 
 import app_base as base
 from automod_modeling_patch import install_automod_modeling
+from english_ui_patch import install_english_ui
 from graph_enhancer_compat import install_compatible_enhancements
 from graph_render_optimization import install_fast_graph_renderer
 from graph_ui_patch import install_dark_graph_renderer, install_graph_interaction
@@ -35,6 +36,10 @@ install_compatible_enhancements(sys.modules[__name__])
 # Apply the final input-page presentation pass after every feature has added
 # its controls, so Layout/CAD panels stay compact without changing behavior.
 install_input_ui_compact(base)
+
+# English-only branch: translate all user-facing Qt text, including dynamic
+# dialogs/status messages, and apply the dedicated Sim_Core application icon.
+install_english_ui(base)
 
 
 def main() -> int:
