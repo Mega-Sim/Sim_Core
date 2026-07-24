@@ -24,8 +24,8 @@ def draw_icon(size: int = 512) -> QImage:
 
     painter.setPen(QPen(QColor(58, 104, 125, 110), p(2)))
     for offset in (64, 96, 128, 160, 192):
-        painter.drawLine(p(offset), p(36), p(offset), p(220))
-        painter.drawLine(p(36), p(offset), p(220), p(offset))
+        painter.drawLine(QPointF(p(offset), p(36)), QPointF(p(offset), p(220)))
+        painter.drawLine(QPointF(p(36), p(offset)), QPointF(p(220), p(offset)))
 
     path = QPainterPath(QPointF(p(48), p(174)))
     path.cubicTo(QPointF(p(88), p(174)), QPointF(p(82), p(92)), QPointF(p(126), p(92)))
