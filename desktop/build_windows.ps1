@@ -4,6 +4,7 @@ $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $BuildDir = Join-Path $RepoRoot "build"
 $CoreBinary = Join-Path $BuildDir "Release\sim-core.exe"
 $SampleDir = Join-Path $RepoRoot "examples\cross_domain"
+$AppIcon = Join-Path $RepoRoot "desktop\generated\sim_core_workbench.png"
 
 Set-Location $RepoRoot
 
@@ -17,6 +18,16 @@ $Python = if (Get-Command python -ErrorAction SilentlyContinue) {
 
 & $Python -m pip install --upgrade pip
 & $Python -m pip install -r desktop\requirements.txt
+& $Python -m pip install pillow
+
+# Generate the dedicated Sim_Core icon used by the Windows executable.  The
+# runtime window icon is drawn by english_ui_patch.py from the same design.
+$env:QT_QPA_PLATFORM = "offscreen"
+& $Python desktop\generate_app_icon.py
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path $AppIcon)) {
+    throw "Application icon generation failed."
+}
+
 & $Python desktop\test_dxf_graph_converter.py
 if ($LASTEXITCODE -ne 0) {
     throw "DXF graph converter tests failed."
@@ -28,6 +39,10 @@ if ($LASTEXITCODE -ne 0) {
 & $Python desktop\test_automod_pm_converter.py
 if ($LASTEXITCODE -ne 0) {
     throw "AutoMod model.arc converter tests failed."
+}
+& $Python desktop\test_isaac_sim_exporter.py
+if ($LASTEXITCODE -ne 0) {
+    throw "NVIDIA Isaac Sim exporter tests failed."
 }
 
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
@@ -55,6 +70,7 @@ $PyInstallerArgs = @(
     "--onefile",
     "--windowed",
     "--name", "Sim_Core_Flow_Workbench",
+    "--icon", "$AppIcon",
     "--add-binary", "$CoreBinary;.",
     "--add-data", "$SampleDir;examples\cross_domain",
     "--collect-all", "ezdxf",

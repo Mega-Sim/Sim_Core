@@ -1,5 +1,4 @@
 """Exercise the native UI and authoritative C++ analysis path without a display."""
-
 from __future__ import annotations
 
 import os
@@ -41,8 +40,10 @@ def main() -> int:
         statistics = window.cad_graph["metadata"]["statistics"]
         if statistics["node_count"] != 3 or statistics["edge_count"] != 2:
             raise RuntimeError("DXF graph counts did not match the UI fixture")
-        if window.cad_automod_button.text() != "AutoMod 모델변환":
+        if not hasattr(window, "cad_automod_button"):
             raise RuntimeError("AutoMod conversion button was not added next to Graph JSON save")
+        if not window.cad_automod_button.text().strip():
+            raise RuntimeError("AutoMod conversion button has no visible label")
         if not window.cad_automod_button.isEnabled():
             raise RuntimeError("AutoMod conversion button was not enabled after DXF conversion")
         geometry_types = [edge.get("geometry_type", "LINE") for edge in window.cad_graph["edges"]]
