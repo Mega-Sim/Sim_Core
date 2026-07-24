@@ -10,6 +10,7 @@ from graph_enhancer_compat import install_compatible_enhancements
 from graph_render_optimization import install_fast_graph_renderer
 from graph_ui_patch import install_dark_graph_renderer, install_graph_interaction
 from input_ui_compact_patch import install_input_ui_compact
+from isaac_sim_english_patch import install_isaac_sim_english
 from isaac_sim_modeling_patch import install_isaac_sim_modeling
 from layout_static_analysis_patch import install_layout_static_analysis
 from pan_fix import install_bidirectional_pan
@@ -39,8 +40,9 @@ install_compatible_enhancements(sys.modules[__name__])
 # its controls, so Layout/CAD panels stay compact without changing behavior.
 install_input_ui_compact(base)
 
-# English-only presentation pass must be installed after all feature patches so
-# dynamic pages, dialogs and status messages are translated consistently.
+# English-only branch: extend translation coverage for the Isaac Sim workflow,
+# then translate all user-facing Qt text and apply the dedicated app icon.
+install_isaac_sim_english()
 install_english_ui(base)
 
 
