@@ -76,7 +76,8 @@ jobs:
         shell: pwsh
         run: ctest --test-dir build -C Release --output-on-failure
 
-      - name: Test native desktop integration
+      - name: Test native desktop Core integration
+        timeout-minutes: 2
         shell: pwsh
         env:
           QT_QPA_PLATFORM: offscreen
@@ -86,7 +87,14 @@ jobs:
             throw "Core binary not found: $env:SIM_CORE_BIN"
           }
           python desktop\smoke_test.py
-          python desktop\graph_ui_smoke_test.py
+
+      - name: Test graph UI integration
+        timeout-minutes: 2
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+          SIM_CORE_BIN: ${{ github.workspace }}\build\Release\sim-core.exe
+        run: python desktop\graph_ui_smoke_test.py
 
       - name: Package Windows executable
         shell: pwsh
