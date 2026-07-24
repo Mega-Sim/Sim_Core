@@ -1,4 +1,4 @@
-"""NVIDIA Isaac Sim modeling page integration for the Sim_Core desktop workbench."""
+"""NVIDIA Isaac Sim modeling page integration for the English Sim_Core desktop workbench."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -28,8 +28,40 @@ from isaac_sim_exporter import (
 ISAAC_PAGE_INDEX = 5
 
 
+def _contains_hangul(value: str) -> bool:
+    return any("가" <= character <= "힣" for character in value)
+
+
+def _english_error(error: Exception, fallback: str) -> str:
+    text = str(error).strip()
+    return fallback if not text or _contains_hangul(text) else text
+
+
+def _normalize_layout_messages(layout: dict[str, Any]) -> dict[str, Any]:
+    validation = layout.get("validation")
+    if not isinstance(validation, dict):
+        return layout
+    warnings = validation.get("warnings")
+    if isinstance(warnings, list):
+        validation["warnings"] = [
+            "No station labels were found in the Graph metadata."
+            if _contains_hangul(str(warning))
+            else str(warning)
+            for warning in warnings
+        ]
+    errors = validation.get("errors")
+    if isinstance(errors, list):
+        validation["errors"] = [
+            "The source layout contains validation errors."
+            if _contains_hangul(str(error))
+            else str(error)
+            for error in errors
+        ]
+    return layout
+
+
 def install_isaac_sim_modeling(base_module: Any) -> None:
-    """Add a rough Graph/AutoMod -> Isaac Sim modeling workflow as a separate page."""
+    """Add a Graph/AutoMod to Isaac Sim modeling workflow as a separate page."""
 
     cls = base_module.MainWindow
     if getattr(cls, "_isaac_sim_modeling_installed", False):
@@ -65,7 +97,7 @@ def install_isaac_sim_modeling(base_module: Any) -> None:
         for position, nav in enumerate(self.nav_buttons):
             nav.setChecked(position == index)
         self.breadcrumb.setText("Sim_Core  /  NVIDIA Isaac Sim Modeling")
-        self.page_title.setText("Graph와 AutoMod 레이아웃을 Isaac Sim Stage로 변환합니다")
+        self.page_title.setText("Convert Graph and AutoMod layouts into an Isaac Sim Stage")
 
     def build_isaac_sim_modeling(self: Any) -> QWidget:
         self.isaac_layout = None
@@ -79,9 +111,9 @@ def install_isaac_sim_modeling(base_module: Any) -> None:
         layout.addWidget(
             base_module.section_title(
                 "NVIDIA ISAAC SIM MODELING",
-                "Isaac Sim 모델링 · Rough Pipeline",
-                "AutoMod_Isaacsim의 pm.asy → 미터 단위 방향성 Layout JSON 구조를 가져와 "
-                "현재 Sim_Core CAD Graph 또는 AutoMod pm.asy를 Isaac Sim에서 바로 열 수 있는 USDA Stage로 변환합니다.",
+                "Isaac Sim Modeling · Rough Pipeline",
+                "Reuse the AutoMod_Isaacsim pm.asy-to-meter directional Layout JSON structure "
+                "to convert the current Sim_Core CAD Graph or an AutoMod pm.asy file into a USDA Stage that can be opened directly in Isaac Sim.",
             )
         )
 
@@ -92,20 +124,20 @@ def install_isaac_sim_modeling(base_module: Any) -> None:
         source_layout.addWidget(
             base_module.section_title(
                 "01 · SOURCE",
-                "모델 소스 선택",
-                "현재 작업 중인 CAD Graph를 그대로 사용하거나 기존 AutoMod model.arc의 pm.asy를 불러올 수 있습니다.",
+                "Select Model Source",
+                "Use the current CAD Graph or load a pm.asy file from an existing AutoMod model.arc directory.",
             )
         )
         source_buttons = QHBoxLayout()
-        use_graph = base_module.button("현재 CAD Graph 사용", "primary")
+        use_graph = base_module.button("Use Current CAD Graph", "primary")
         use_graph.clicked.connect(self.use_current_graph_for_isaac)
-        choose_pm = base_module.button("AutoMod pm.asy 선택", "secondary")
+        choose_pm = base_module.button("Select AutoMod pm.asy", "secondary")
         choose_pm.clicked.connect(self.select_automod_pm_for_isaac)
         source_buttons.addWidget(use_graph)
         source_buttons.addWidget(choose_pm)
         source_buttons.addStretch(1)
         source_layout.addLayout(source_buttons)
-        self.isaac_source_status = QLabel("소스 미선택 · CAD Graph 또는 pm.asy를 선택해 주세요.")
+        self.isaac_source_status = QLabel("No source selected · Select a CAD Graph or pm.asy file.")
         self.isaac_source_status.setObjectName("Muted")
         self.isaac_source_status.setWordWrap(True)
         source_layout.addWidget(self.isaac_source_status)
@@ -113,9 +145,9 @@ def install_isaac_sim_modeling(base_module: Any) -> None:
 
         flow = QHBoxLayout()
         for code, title, description in [
-            ("1", "Layout JSON", "좌표를 meter로 정규화하고 방향성 Guide Path, Station, Routing Point를 분리합니다."),
-            ("2", "USD Stage", "Guide Path는 BasisCurves, Station은 placeholder Cube로 구성한 isaac_stage.usda를 생성합니다."),
-            ("3", "Isaac Loader", "Isaac Sim Script Editor에서 Stage를 여는 load_in_isaac_sim.py를 함께 생성합니다."),
+            ("1", "Layout JSON", "Normalize coordinates to meters and separate directed Guide Paths, Stations, and Routing Points."),
+            ("2", "USD Stage", "Generate isaac_stage.usda with Guide Paths as BasisCurves and Stations as placeholder Cubes."),
+            ("3", "Isaac Loader", "Generate load_in_isaac_sim.py for opening the Stage from the Isaac Sim Script Editor."),
         ]:
             card = QFrame()
             card.setObjectName("Panel")
@@ -142,12 +174,12 @@ def install_isaac_sim_modeling(base_module: Any) -> None:
         output_layout.addWidget(
             base_module.section_title(
                 "02 · EXPORT",
-                "Isaac Sim 모델 패키지 생성",
-                "현재 단계는 러프 모델링용입니다. 레일/스테이션 배치까지 생성하고 OHT·AMR 3D Asset 연결과 물리 속성은 다음 단계에서 확장합니다.",
+                "Generate Isaac Sim Model Package",
+                "This is a rough modeling pipeline. It currently generates rail and station placement; OHT/AMR 3D assets and physical properties can be added in later phases.",
             )
         )
         export_row = QHBoxLayout()
-        self.isaac_export_button = base_module.button("Isaac Sim 모델 생성", "primary")
+        self.isaac_export_button = base_module.button("Generate Isaac Sim Model", "primary")
         self.isaac_export_button.setEnabled(False)
         self.isaac_export_button.clicked.connect(self.export_isaac_sim_package)
         export_row.addWidget(self.isaac_export_button)
@@ -158,7 +190,7 @@ def install_isaac_sim_modeling(base_module: Any) -> None:
         self.isaac_summary.setObjectName("Terminal")
         self.isaac_summary.setMinimumHeight(165)
         self.isaac_summary.setPlaceholderText(
-            "소스를 선택하면 Node / Edge / Station 수와 변환 상태가 표시됩니다."
+            "Select a source to display Node, Edge, Station counts and conversion status."
         )
         output_layout.addWidget(self.isaac_summary)
         layout.addWidget(output_panel, 1)
@@ -193,24 +225,31 @@ def install_isaac_sim_modeling(base_module: Any) -> None:
         if not graph:
             QMessageBox.warning(
                 self,
-                "CAD Graph 필요",
-                "입력 · CAD 메뉴에서 DXF/Rail을 먼저 Graph로 변환해 주세요.",
+                "CAD Graph Required",
+                "Convert a DXF or Rail file into a Graph from the Input · CAD menu first.",
             )
             return
         try:
-            self.isaac_layout = build_isaac_layout_from_graph(graph)
+            self.isaac_layout = _normalize_layout_messages(build_isaac_layout_from_graph(graph))
         except IsaacSimExportError as error:
-            QMessageBox.critical(self, "Isaac 변환 실패", str(error))
+            QMessageBox.critical(
+                self,
+                "Isaac Conversion Failed",
+                _english_error(
+                    error,
+                    "The current CAD Graph could not be converted. Check Nodes, Edges, and explicit edge directions.",
+                ),
+            )
             return
         self.isaac_source_path = getattr(self, "cad_path", None)
         label = (
-            f"현재 CAD Graph · {self.isaac_source_path.name}"
+            f"Current CAD Graph · {self.isaac_source_path.name}"
             if self.isaac_source_path
-            else "현재 CAD Graph"
+            else "Current CAD Graph"
         )
-        self.isaac_source_status.setText(f"선택 완료 · {label}")
+        self.isaac_source_status.setText(f"Selected · {label}")
         self.update_isaac_summary(label)
-        self.statusBar().showMessage("현재 CAD Graph를 Isaac Sim 모델링 소스로 연결했습니다.", 6000)
+        self.statusBar().showMessage("The current CAD Graph is connected as the Isaac Sim modeling source.", 6000)
 
     def select_automod_pm_for_isaac(self: Any) -> None:
         default_dir = str(
@@ -220,7 +259,7 @@ def install_isaac_sim_modeling(base_module: Any) -> None:
         )
         selected, _ = QFileDialog.getOpenFileName(
             self,
-            "AutoMod pm.asy 선택",
+            "Select AutoMod pm.asy",
             default_dir,
             "AutoMod movement system (pm.asy);;ASY files (*.asy);;All files (*)",
         )
@@ -228,25 +267,29 @@ def install_isaac_sim_modeling(base_module: Any) -> None:
             return
         source = Path(selected)
         try:
-            self.isaac_layout = load_automod_pm_layout(source)
+            self.isaac_layout = _normalize_layout_messages(load_automod_pm_layout(source))
         except (IsaacSimExportError, OSError) as error:
-            QMessageBox.critical(self, "pm.asy 변환 실패", str(error))
+            QMessageBox.critical(
+                self,
+                "pm.asy Conversion Failed",
+                _english_error(error, "The selected AutoMod pm.asy file could not be converted."),
+            )
             return
         self.isaac_source_path = source
         label = f"AutoMod pm.asy · {source}"
-        self.isaac_source_status.setText(f"선택 완료 · {label}")
+        self.isaac_source_status.setText(f"Selected · {label}")
         self.update_isaac_summary(label)
-        self.statusBar().showMessage("AutoMod pm.asy를 Isaac Sim 모델링 소스로 변환했습니다.", 6000)
+        self.statusBar().showMessage("The AutoMod pm.asy file was converted into an Isaac Sim modeling source.", 6000)
 
     def export_isaac_sim_package(self: Any) -> None:
         if not self.isaac_layout:
-            QMessageBox.warning(self, "모델 소스 필요", "CAD Graph 또는 AutoMod pm.asy를 먼저 선택해 주세요.")
+            QMessageBox.warning(self, "Model Source Required", "Select a CAD Graph or AutoMod pm.asy file first.")
             return
         source = self.isaac_source_path
         default_dir = source.parent if isinstance(source, Path) else Path.home() / "Documents"
         selected = QFileDialog.getExistingDirectory(
             self,
-            "Isaac Sim 모델 출력 상위 폴더 선택",
+            "Select Parent Folder for Isaac Sim Model Output",
             str(default_dir),
         )
         if not selected:
@@ -258,7 +301,11 @@ def install_isaac_sim_modeling(base_module: Any) -> None:
         try:
             generated = save_isaac_package(self.isaac_layout, target)
         except (IsaacSimExportError, OSError, ValueError) as error:
-            QMessageBox.critical(self, "Isaac 모델 생성 실패", str(error))
+            QMessageBox.critical(
+                self,
+                "Isaac Model Generation Failed",
+                _english_error(error, "The Isaac Sim model package could not be generated."),
+            )
             return
         self.isaac_output_dir = target
         current = self.isaac_summary.toPlainText()
@@ -269,12 +316,12 @@ def install_isaac_sim_modeling(base_module: Any) -> None:
             + f"  Stage  : {generated['stage']}\n"
             + f"  Loader : {generated['loader']}\n"
         )
-        self.statusBar().showMessage(f"Isaac Sim 모델 생성 완료 · {target}", 10000)
+        self.statusBar().showMessage(f"Isaac Sim model generation completed · {target}", 10000)
         QMessageBox.information(
             self,
-            "Isaac Sim 모델 생성 완료",
-            f"{target}\n\nIsaac Sim에서 isaac_stage.usda를 열거나 "
-            "Script Editor에서 load_in_isaac_sim.py를 실행해 주세요.",
+            "Isaac Sim Model Generation Completed",
+            f"{target}\n\nOpen isaac_stage.usda in Isaac Sim or run "
+            "load_in_isaac_sim.py from the Script Editor.",
         )
 
     cls.build_sidebar = build_sidebar
